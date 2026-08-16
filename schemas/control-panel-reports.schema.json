@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/control-panel-reports.schema.json",
+  "title": "Lanxing Control Panel Queue and Reports",
+  "description": "permission queue、diagnostic report、last error summary；companion backend → renderer，不含凭据明文",
+  "oneOf": [
+    { "$ref": "#/$defs/permissionQueue" },
+    { "$ref": "#/$defs/diagnosticReport" },
+    { "$ref": "#/$defs/lastErrorSummary" }
+  ],
+  "$defs": {
+    "permissionId": {
+      "type": "string",
+      "enum": [
+        "workspace.read",
+        "workspace.write",
+        "command.run",
+        "network.access",
+        "git.read",
+        "git.write",
+        "secrets.read",
+        "desktop.control"
+      ]
+    },
+    "proposedScope": {
+      "type": "object",
+      "properties": {
+        "workspaceRoot": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "networkHosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissionQueueItem": {
+      "type": "object",
+      "required": [
+        "permissionRequestId",
+        "queueStatus",
+        "requester",
+        "jobId",
+        "requestedPermissions",
+        "reason",
+        "risk",
+        "proposedScope",
+        "availableDecisions",
+        "denyConsequence",
+        "requestedAt"
+      ],
+      "properties": {
+        "permissionRequestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "queueStatus": {
+          "enum": ["pending", "decided", "expired"]
+        },
+        "requester": {
+          "enum": ["zhang-boss", "companion", "openclaw-adapter"]
+        },
+        "affairId": {
+          "type": ["string", "null"]
+        },
+        "jobId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestedPermissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/permissionId"
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk": {
+          "enum": ["low", "medium", "high"]
+        },
+        "proposedScope": {
+          "$ref": "#/$defs/proposedScope"
+        },
+        "availableDecisions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["allow_once", "allow_for_job", "deny", "require_more_context"]
+          },
+          "uniqueItems": true
+        },
+        "denyConsequence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissionQueue": {
+      "type": "object",
+      "required": ["schemaVersion", "queueId", "generatedAt", "pendingCount", "items"],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "0.1"
+        },
+        "queueId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "pendingCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/permissionQueueItem"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "probeItem": {
+      "type": "object",
+      "required": ["probeId", "label", "category", "status", "detail"],
+      "properties": {
+        "probeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": ["service", "environment"]
+        },
+        "status": {
+          "enum": ["ok", "warn", "error", "unknown"]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "hint": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "lastErrorSummary": {
+      "type": "object",
+      "required": ["occurredAt", "code", "severity", "message", "retryable"],
+      "properties": {
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": ["info", "warn", "error"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "affairId": {
+          "type": ["string", "null"]
+        },
+        "jobId": {
+          "type": ["string", "null"]
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "diagnosticReport": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "reportId",
+        "generatedAt",
+        "overallStatus",
+        "services",
+        "environment",
+        "lastError",
+        "copyText"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "0.1"
+        },
+        "reportId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "overallStatus": {
+          "enum": ["ok", "warn", "error"]
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/probeItem"
+          }
+        },
+        "environment": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/probeItem"
+          }
+        },
+        "lastError": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/lastErrorSummary" }
+          ]
+        },
+        "copyText": {
+          "type": "string",
+          "description": "复制用纯文本摘要；不得含凭据明文"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

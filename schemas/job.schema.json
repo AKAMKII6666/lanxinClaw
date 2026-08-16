@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/job.schema.json",
+  "title": "Lanxing Claw Job",
+  "type": "object",
+  "required": ["jobId", "affairId", "executor", "status", "goal", "allowedPermissions"],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "affairId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "executor": {
+      "enum": ["openclaw"]
+    },
+    "status": {
+      "enum": ["queued", "running", "needs_permission", "blocked", "completed", "failed", "canceled"]
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workspaceHint": {
+      "type": ["string", "null"]
+    },
+    "allowedPermissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "progressSummary": {
+      "type": "string"
+    },
+    "blockedReason": {
+      "type": ["string", "null"]
+    },
+    "resumeCondition": {
+      "type": ["string", "null"]
+    },
+    "permissionRequestId": {
+      "type": ["string", "null"]
+    }
+  },
+  "additionalProperties": false
+}
+

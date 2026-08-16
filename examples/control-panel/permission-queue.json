@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "0.1",
+  "queueId": "ui_queue_001",
+  "generatedAt": "2026-07-23T01:00:00.000Z",
+  "pendingCount": 1,
+  "items": [
+    {
+      "permissionRequestId": "perm_req_001",
+      "queueStatus": "pending",
+      "requester": "zhang-boss",
+      "affairId": "affair_fix_code_001",
+      "jobId": "job_fix_code_001",
+      "requestedPermissions": ["workspace.write"],
+      "reason": "当前 job 需要修复测试失败并写入项目文件",
+      "risk": "medium",
+      "proposedScope": {
+        "workspaceRoot": "F:/workspace/xxx",
+        "commands": [],
+        "networkHosts": []
+      },
+      "availableDecisions": [
+        "allow_once",
+        "allow_for_job",
+        "deny",
+        "require_more_context"
+      ],
+      "denyConsequence": "本 job 将停在 needs_permission，不会修改该目录",
+      "requestedAt": "2026-07-23T00:58:00.000Z",
+      "expiresAt": null
+    }
+  ]
+}

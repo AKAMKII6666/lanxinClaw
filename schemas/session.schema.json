@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/session.schema.json",
+  "title": "Lanxing Session Payloads",
+  "description": "session.* message payload shapes for protocol 0.1",
+  "oneOf": [
+    { "$ref": "#/$defs/sessionOpen" },
+    { "$ref": "#/$defs/sessionAccepted" },
+    { "$ref": "#/$defs/sessionHeartbeat" },
+    { "$ref": "#/$defs/sessionClosed" },
+    { "$ref": "#/$defs/sessionReauthRequired" }
+  ],
+  "$defs": {
+    "sessionOpen": {
+      "type": "object",
+      "required": ["sessionId", "phoneDeviceId", "desktopDeviceId", "authProof", "protocolVersion"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phoneDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desktopDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authProof": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocolVersion": {
+          "type": "string",
+          "const": "0.1"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionAccepted": {
+      "type": "object",
+      "required": ["sessionId", "acceptedAt", "heartbeatIntervalMs"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "acceptedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "heartbeatIntervalMs": {
+          "type": "integer",
+          "minimum": 1000
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionHeartbeat": {
+      "type": "object",
+      "required": ["sessionId", "sentAt"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sentAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionClosed": {
+      "type": "object",
+      "required": ["sessionId", "reason", "closedAt"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "closedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionReauthRequired": {
+      "type": "object",
+      "required": ["reason", "requiredAction"],
+      "properties": {
+        "sessionId": {
+          "type": ["string", "null"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiredAction": {
+          "enum": ["reopen", "repair"]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

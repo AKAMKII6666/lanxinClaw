@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/permission.schema.json",
+  "title": "Lanxing Permission Payloads",
+  "description": "permission.* message payload shapes for protocol 0.1；companion 是授权权威",
+  "oneOf": [
+    { "$ref": "#/$defs/permissionRequest" },
+    { "$ref": "#/$defs/permissionDecision" }
+  ],
+  "$defs": {
+    "permissionId": {
+      "type": "string",
+      "enum": [
+        "workspace.read",
+        "workspace.write",
+        "command.run",
+        "network.access",
+        "git.read",
+        "git.write",
+        "secrets.read",
+        "desktop.control"
+      ]
+    },
+    "permissionRequest": {
+      "type": "object",
+      "required": [
+        "permissionRequestId",
+        "jobId",
+        "requestedPermissions",
+        "reason",
+        "risk",
+        "proposedScope"
+      ],
+      "properties": {
+        "permissionRequestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "jobId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "affairId": {
+          "type": ["string", "null"]
+        },
+        "requestedPermissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/permissionId"
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk": {
+          "enum": ["low", "medium", "high"]
+        },
+        "proposedScope": {
+          "type": "object",
+          "properties": {
+            "workspaceRoot": {
+              "type": "string",
+              "minLength": 1
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "networkHosts": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissionDecision": {
+      "type": "object",
+      "required": ["permissionRequestId", "decision", "decidedAt"],
+      "properties": {
+        "permissionRequestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "jobId": {
+          "type": ["string", "null"]
+        },
+        "decision": {
+          "enum": ["allow_once", "allow_for_job", "deny", "require_more_context"]
+        },
+        "decidedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "note": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

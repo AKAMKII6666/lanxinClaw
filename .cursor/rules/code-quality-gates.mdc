@@ -1,0 +1,22 @@
+---
+description: 结构、复杂度、注释与统一质量入口硬门禁
+alwaysApply: true
+---
+
+# 代码质量门禁
+
+质量门禁真源见 [质量门禁.md](../../docs/共同维护/技术设计/质量门禁.md)。
+
+## 必须执行
+
+- 任务完成前运行 `npm run quality`，除非本次只做只读分析。
+- 门禁失败不得声称完成。
+- 新增豁免必须集中登记在 gate config，包含 ruleId、target、reason、owner、createdAt、exitCondition。
+- 禁止大范围豁免，如 `apps/**`、`packages/**`、`src/**`、`**/*`。
+- 门禁脚本自身必须有自测；修改门禁时同步测试。
+
+## 禁止事项
+
+- 为通过门禁删除有价值注释、压缩代码、合并无关逻辑。
+- 用无原因 `eslint-disable`、`@ts-ignore`、`@ts-expect-error` 掩盖问题。
+- 降低全局阈值之外的规则强度来迁就单个文件。

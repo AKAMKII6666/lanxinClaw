@@ -1,0 +1,9 @@
+{
+  "occurredAt": "2026-07-22T21:08:00.000Z",
+  "code": "job.blocked",
+  "severity": "error",
+  "message": "无法访问 npm registry",
+  "affairId": "affair_fix_code_001",
+  "jobId": "job_fix_code_001",
+  "retryable": true
+}

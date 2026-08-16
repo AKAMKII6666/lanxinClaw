@@ -1,0 +1,42 @@
+---
+description: 澜星 Claw 核心工程边界与规则索引
+alwaysApply: true
+---
+
+# 核心工程规则
+
+项目导航见 [AGENTS.md](../../AGENTS.md)。规则冲突时，以 [规则制定原则.mdc](./规则制定原则.mdc) 为准。
+
+## 必须执行
+
+- 电话端只通过协议请求事务、聊天、配对和状态同步，不直接执行电脑副作用。
+- Companion 是桌面安全边界，所有文件、命令、网络、git、GUI 权限必须经 companion 判断。
+- OpenClaw core 默认不承载张老板人格、事务簿、电话配对或权限策略。
+- Worker job 完成不等于 affair 完成；事务关闭必须等待用户接受或明确取消。
+- 新增协议消息必须写文档，并同步 JSON Schema 或说明暂不具备 schema 的原因。
+- 凭据不得写入 repo、日志或示例明文。
+- 新代码遵循 [编码风格.md](../../docs/共同维护/技术设计/编码风格.md) 的命名、分层、错误处理和日志规范。
+- 文档和注释遵循 [语言规范.md](../../docs/共同维护/技术设计/语言规范.md)：默认中文，字段、API、协议名等专业标识可保留英文。
+- 新文件落点遵循 [目录落点.md](../../docs/共同维护/技术设计/目录落点.md)，不得无限平铺或用长前缀代目录。
+- 不要自动 commit，除非用户明确要求。
+
+## 默认执行
+
+- 优先新增 adapter / bridge / protocol package，避免修改上游 core。
+- 新能力先有协议草案、状态流和权限归属，再实现。
+- 状态更新必须可恢复：断线、重连、暂停、阻塞都要有 id 和 resume 条件。
+- UI 和 shell 只展示与确认权限，不绕过 companion 后端的权限判断。
+- 测试覆盖随风险扩大：协议与权限变更需要单测或 contract test。
+
+## 领域规则索引
+
+| 文件 | 触发 |
+|------|------|
+| [protocol-boundaries.mdc](./protocol-boundaries.mdc) | 修改协议、schema、message type |
+| [openclaw-adapter-boundaries.mdc](./openclaw-adapter-boundaries.mdc) | 接入或修改 OpenClaw |
+| [security-and-permissions.mdc](./security-and-permissions.mdc) | 配对、凭据、权限、网络暴露 |
+| [directory-layout.mdc](./directory-layout.mdc) | 新增/移动文件、目录重组 |
+| [comment-contracts.mdc](./comment-contracts.mdc) | 导出契约、入参出参、字段说明 |
+| [code-quality-gates.mdc](./code-quality-gates.mdc) | 结构、复杂度、barrel、门禁脚本 |
+| [testing-and-quality.mdc](./testing-and-quality.mdc) | 修改后的验证和报告 |
+| [docs-governance.mdc](./docs-governance.mdc) | 修改 `docs/**` |

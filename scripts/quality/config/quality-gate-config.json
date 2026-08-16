@@ -1,0 +1,30 @@
+{
+  "sourceRoots": ["apps", "packages", "scripts/quality"],
+  "sourceExtensions": [".js", ".mjs", ".ts", ".tsx"],
+  "excludeDirNames": ["node_modules", ".git", "dist", "build", ".next", "coverage", "fixtures"],
+  "strictContractDirs": [
+    "packages/protocol/src",
+    "packages/openclaw-adapter/src",
+    "apps/companion/src/bridge",
+    "apps/companion/src/pairing",
+    "apps/companion/src/permissions",
+    "apps/companion/src/credentials",
+    "apps/companion/src/jobs"
+  ],
+  "thresholds": {
+    "protocol": { "warnLines": 250, "hardLines": 400 },
+    "companion": { "warnLines": 300, "hardLines": 450 },
+    "ui": { "warnLines": 220, "hardLines": 350 },
+    "page": { "warnLines": 120, "hardLines": 200 },
+    "other": { "warnLines": 350, "hardLines": 500 },
+    "test": { "warnLines": 450, "hardLines": 700 },
+    "function": { "warnLines": 50, "hardLines": 90 },
+    "complexity": { "warn": 10, "hard": 15 }
+  },
+  "allowedInternalBarrels": [
+    "packages/protocol/src/index.ts",
+    "packages/openclaw-adapter/src/index.ts"
+  ],
+  "allowlist": []
+}
+

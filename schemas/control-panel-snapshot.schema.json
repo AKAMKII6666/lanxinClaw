@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/control-panel-snapshot.schema.json",
+  "title": "Lanxing Control Panel Snapshot",
+  "description": "companion backend → renderer 的总览状态快照；不含凭据明文，不是 phone↔companion envelope",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "snapshotId",
+    "generatedAt",
+    "companion",
+    "clawCore",
+    "credential",
+    "device",
+    "zhangBoss",
+    "currentAffair"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "snapshotId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "companion": {
+      "$ref": "#/$defs/companionStatus"
+    },
+    "clawCore": {
+      "$ref": "#/$defs/clawCoreStatus"
+    },
+    "credential": {
+      "$ref": "#/$defs/credentialStatus"
+    },
+    "device": {
+      "$ref": "#/$defs/deviceStatus"
+    },
+    "zhangBoss": {
+      "$ref": "#/$defs/zhangBossStatus"
+    },
+    "currentAffair": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/currentAffairSummary" }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "companionStatus": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "enum": ["stopped", "starting", "running", "degraded", "error"]
+        },
+        "version": {
+          "type": ["string", "null"]
+        },
+        "uptimeMs": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "message": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "clawCoreStatus": {
+      "type": "object",
+      "required": ["status", "adapterReady"],
+      "properties": {
+        "status": {
+          "enum": ["not_installed", "stopped", "starting", "running", "error"]
+        },
+        "version": {
+          "type": ["string", "null"]
+        },
+        "adapterReady": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "credentialStatus": {
+      "type": "object",
+      "required": ["status", "provider"],
+      "properties": {
+        "status": {
+          "enum": ["missing", "synced", "expired", "needs_reauth"]
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "凭据用途标签，不是 key 原文"
+        },
+        "lastSyncedAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "message": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "deviceStatus": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "enum": ["undiscovered", "discovered", "pairing", "connected", "disconnected"]
+        },
+        "phoneDeviceId": {
+          "type": ["string", "null"]
+        },
+        "phoneDisplayName": {
+          "type": ["string", "null"]
+        },
+        "pairingId": {
+          "type": ["string", "null"]
+        },
+        "sessionId": {
+          "type": ["string", "null"]
+        },
+        "fingerprintHint": {
+          "type": ["string", "null"],
+          "description": "截断指纹提示，不得是完整私钥"
+        },
+        "lastSeenAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "message": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "zhangBossStatus": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "enum": ["offline", "online", "in_call", "supervising", "waiting_user"]
+        },
+        "activeAffairId": {
+          "type": ["string", "null"]
+        },
+        "activeCallId": {
+          "type": ["string", "null"]
+        },
+        "summary": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "currentAffairSummary": {
+      "type": "object",
+      "required": ["affairId", "title", "status", "progressSummary", "updatedAt"],
+      "properties": {
+        "affairId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "clarifying",
+            "ready",
+            "delegated",
+            "running",
+            "blocked",
+            "paused",
+            "waiting_acceptance",
+            "closed",
+            "canceled"
+          ]
+        },
+        "currentJobId": {
+          "type": ["string", "null"]
+        },
+        "executor": {
+          "type": ["string", "null"]
+        },
+        "progressSummary": {
+          "type": "string"
+        },
+        "blockedReason": {
+          "type": ["string", "null"]
+        },
+        "resumeCondition": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

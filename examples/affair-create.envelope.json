@@ -1,0 +1,32 @@
+{
+  "protocolVersion": "0.1",
+  "messageId": "msg_affair_create_001",
+  "sentAt": "2026-07-22T00:00:00.000Z",
+  "source": {
+    "kind": "phone",
+    "deviceId": "phone_lanxing_001"
+  },
+  "target": {
+    "kind": "companion",
+    "deviceId": "desktop_liao_pc"
+  },
+  "type": "affair.create",
+  "payload": {
+    "affairId": "affair_fix_code_001",
+    "title": "Fix the xxx project code issue",
+    "ownerAgent": "zhang-boss",
+    "status": "ready",
+    "context": [
+      "The user said the code seems broken.",
+      "The project is under F:/workspace/xxx."
+    ],
+    "acceptanceCriteria": [
+      "Relevant tests pass.",
+      "The user accepts the result."
+    ],
+    "blockedReason": null,
+    "resumeCondition": null,
+    "currentJobId": null
+  }
+}
+

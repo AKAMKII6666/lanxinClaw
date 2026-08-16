@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/pairing.schema.json",
+  "title": "Lanxing Pairing Payloads",
+  "description": "pairing.* message payload shapes for protocol 0.1",
+  "oneOf": [
+    { "$ref": "#/$defs/pairingRequest" },
+    { "$ref": "#/$defs/pairingChallenge" },
+    { "$ref": "#/$defs/pairingConfirmed" },
+    { "$ref": "#/$defs/pairingDesktopApproved" },
+    { "$ref": "#/$defs/pairingCompleted" },
+    { "$ref": "#/$defs/pairingRevoked" }
+  ],
+  "$defs": {
+    "pairingRequest": {
+      "type": "object",
+      "required": ["pairingId", "phoneDeviceId", "phoneDisplayName", "protocolVersion", "capabilities"],
+      "properties": {
+        "pairingId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phoneDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phoneDisplayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocolVersion": {
+          "type": "string",
+          "const": "0.1"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "pairingChallenge": {
+      "type": "object",
+      "required": ["pairingId", "desktopDeviceId", "desktopDisplayName", "challenge", "expiresAt"],
+      "properties": {
+        "pairingId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desktopDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desktopDisplayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "challenge": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "pairingConfirmed": {
+      "type": "object",
+      "required": ["pairingId", "challengeResponse", "phoneConfirmedAt"],
+      "properties": {
+        "pairingId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "challengeResponse": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phoneConfirmedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "pairingDesktopApproved": {
+      "type": "object",
+      "required": ["pairingId", "desktopApprovedAt"],
+      "properties": {
+        "pairingId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desktopApprovedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "pairingCompleted": {
+      "type": "object",
+      "required": ["pairingId", "phoneDeviceId", "desktopDeviceId", "pairedAt"],
+      "properties": {
+        "pairingId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phoneDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desktopDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pairedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "pairingRevoked": {
+      "type": "object",
+      "required": ["phoneDeviceId", "desktopDeviceId", "reason", "revokedAt"],
+      "properties": {
+        "pairingId": {
+          "type": ["string", "null"]
+        },
+        "phoneDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desktopDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revokedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

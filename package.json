@@ -1,0 +1,34 @@
+{
+  "name": "lanxin-claw",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "check:docs-layout": "node scripts/quality/gates/docs/check-docs-layout.mjs",
+    "check:language": "node scripts/quality/gates/language/check-language.mjs",
+    "check:structure": "node scripts/quality/gates/structure/check-structure.mjs",
+    "check:comments": "node scripts/quality/gates/comments/check-comments.mjs",
+    "test:quality": "node --test scripts/quality/tests/*.test.mjs",
+    "test:protocol": "npm run test -w @lanxin-claw/protocol",
+    "test:mock-companion": "npm run test -w @lanxin-claw/mock-companion",
+    "test:openclaw-adapter": "npm run test -w @lanxin-claw/openclaw-adapter",
+    "test:companion": "npm run test -w @lanxin-claw/companion",
+    "demo:low-risk-job": "npm run demo:low-risk -w @lanxin-claw/companion",
+    "smoke:gateway": "tsx scripts/gateway/run-gateway-smoke.ts",
+    "e2e:real-companion": "tsx scripts/sim-phone/run-real-companion-loop.ts",
+    "e2e:v1.3": "npm run e2e:v1.3 -w @lanxin-claw/companion",
+    "dev:companion": "npm run dev:shell -w @lanxin-claw/companion",
+    "start:companion": "npm run start:shell -w @lanxin-claw/companion",
+    "quality": "node scripts/quality/quality.mjs",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

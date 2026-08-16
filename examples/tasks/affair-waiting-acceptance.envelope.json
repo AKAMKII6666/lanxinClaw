@@ -1,0 +1,33 @@
+{
+  "protocolVersion": "0.1",
+  "messageId": "msg_affair_waiting_acceptance_001",
+  "correlationId": "msg_job_completed_001",
+  "sentAt": "2026-07-23T00:21:00.000Z",
+  "source": {
+    "kind": "companion",
+    "deviceId": "desktop_liao_pc"
+  },
+  "target": {
+    "kind": "phone",
+    "deviceId": "phone_lanxing_001"
+  },
+  "type": "affair.update",
+  "payload": {
+    "affairId": "affair_fix_code_001",
+    "title": "修好 xxx 项目代码问题",
+    "ownerAgent": "zhang-boss",
+    "status": "waiting_acceptance",
+    "context": [
+      "用户说代码好像坏了。",
+      "项目在 F:/workspace/xxx。",
+      "worker 已报告 job.completed；等待用户验收，不得自动 closed。"
+    ],
+    "acceptanceCriteria": [
+      "相关测试通过。",
+      "用户接受结果。"
+    ],
+    "blockedReason": null,
+    "resumeCondition": null,
+    "currentJobId": "job_fix_code_001"
+  }
+}

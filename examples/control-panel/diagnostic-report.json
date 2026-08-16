@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "0.1",
+  "reportId": "ui_diag_001",
+  "generatedAt": "2026-07-23T01:00:00.000Z",
+  "overallStatus": "warn",
+  "services": [
+    {
+      "probeId": "companion.service",
+      "label": "Companion service",
+      "category": "service",
+      "status": "ok",
+      "detail": "running; version=0.1.0-dev",
+      "hint": null
+    },
+    {
+      "probeId": "openclaw.core",
+      "label": "OpenClaw core",
+      "category": "service",
+      "status": "ok",
+      "detail": "adapterReady=true; runtime=mock",
+      "hint": null
+    },
+    {
+      "probeId": "credential.api",
+      "label": "API key 配置态",
+      "category": "service",
+      "status": "ok",
+      "detail": "provider=openclaw-api; status=synced",
+      "hint": null
+    },
+    {
+      "probeId": "secure.storage",
+      "label": "Secure storage",
+      "category": "service",
+      "status": "ok",
+      "detail": "os keychain reachable",
+      "hint": null
+    }
+  ],
+  "environment": [
+    {
+      "probeId": "env.node",
+      "label": "Node",
+      "category": "environment",
+      "status": "ok",
+      "detail": ">=20 available",
+      "hint": null
+    },
+    {
+      "probeId": "env.package_manager",
+      "label": "Package manager",
+      "category": "environment",
+      "status": "ok",
+      "detail": "npm available",
+      "hint": null
+    },
+    {
+      "probeId": "env.git",
+      "label": "Git",
+      "category": "environment",
+      "status": "ok",
+      "detail": "git available",
+      "hint": null
+    },
+    {
+      "probeId": "net.lan_discovery",
+      "label": "LAN discovery",
+      "category": "environment",
+      "status": "warn",
+      "detail": "mDNS 可能被防火墙拦截",
+      "hint": "检查防火墙是否放行 mDNS / 本机 companion 端口"
+    },
+    {
+      "probeId": "net.firewall",
+      "label": "Firewall",
+      "category": "environment",
+      "status": "warn",
+      "detail": "本机防火墙规则未确认",
+      "hint": "确认 companion 监听端口未被阻止"
+    }
+  ],
+  "lastError": {
+    "occurredAt": "2026-07-22T21:08:00.000Z",
+    "code": "job.blocked",
+    "severity": "error",
+    "message": "无法访问 npm registry",
+    "affairId": "affair_fix_code_001",
+    "jobId": "job_fix_code_001",
+    "retryable": true
+  },
+  "copyText": "overall=warn; companion=ok; openclaw=ok; credential=synced; lan_discovery=warn; firewall=warn; lastError=job.blocked"
+}

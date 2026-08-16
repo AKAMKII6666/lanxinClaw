@@ -1,0 +1,29 @@
+---
+description: 修改后的检查、测试与质量门禁
+alwaysApply: true
+---
+
+# 测试与质量门禁
+
+## 当前阶段
+
+仓库当前以协议和文档为主。统一质量入口为 `npm run quality`。
+
+## 修改后验证
+
+| 改动类型 | 验证 |
+|----------|------|
+| 纯文档 / rules | `npm run quality` |
+| JSON Schema | 用 schema validator 验证示例，或说明未配置工具 |
+| 协议 package | 单元测试 message validation / state transition |
+| Companion | 单元测试 + pairing/permission integration test |
+| OpenClaw adapter | 使用 mocked OpenClaw runtime 做 contract test |
+
+## 报告要求
+
+总结必须说明：
+
+- 改了哪些边界或协议。
+- 运行了哪些命令及结果。
+- 哪些验证因仓库阶段或环境尚未配置而未运行。
+- 剩余风险。

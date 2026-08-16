@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/discovery-advertisement.schema.json",
+  "title": "Lanxing Discovery Advertisement",
+  "description": "LAN mDNS/DNS-SD TXT 逻辑字段；不得含凭据、路径或项目列表",
+  "type": "object",
+  "required": [
+    "deviceName",
+    "deviceIdHint",
+    "serviceVersion",
+    "protocolVersion",
+    "pairingAvailable",
+    "pairedPhoneIds",
+    "capabilities"
+  ],
+  "properties": {
+    "deviceName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "deviceIdHint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "serviceVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "protocolVersion": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "pairingAvailable": {
+      "type": "boolean"
+    },
+    "pairedPhoneIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false
+}

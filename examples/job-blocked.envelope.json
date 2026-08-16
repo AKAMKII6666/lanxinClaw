@@ -1,0 +1,27 @@
+{
+  "protocolVersion": "0.1",
+  "messageId": "msg_job_blocked_001",
+  "correlationId": "msg_job_create_001",
+  "sentAt": "2026-07-22T00:05:00.000Z",
+  "source": {
+    "kind": "companion",
+    "deviceId": "desktop_liao_pc"
+  },
+  "target": {
+    "kind": "phone",
+    "deviceId": "phone_lanxing_001"
+  },
+  "type": "job.blocked",
+  "payload": {
+    "jobId": "job_fix_code_001",
+    "affairId": "affair_fix_code_001",
+    "executor": "openclaw",
+    "status": "blocked",
+    "goal": "Inspect and fix the selected project until tests pass.",
+    "workspaceHint": "F:/workspace/xxx",
+    "allowedPermissions": ["workspace.read", "command.run", "network.access"],
+    "progressSummary": "Dependency installation was attempted three times.",
+    "blockedReason": "The desktop cannot reach the package registry. Resume after network access is restored."
+  }
+}
+

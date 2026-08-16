@@ -1,0 +1,29 @@
+{
+  "name": "@lanxin-claw/openclaw-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "将 Lanxing job 翻译为 OpenClaw run/status（create/read/cancel）",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@lanxin-claw/protocol": "0.1.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.0"
+  }
+}

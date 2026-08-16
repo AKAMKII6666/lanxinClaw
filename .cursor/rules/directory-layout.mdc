@@ -1,0 +1,23 @@
+---
+description: 目录落点、同类文件收纳与禁止平铺规则
+alwaysApply: true
+---
+
+# 目录落点规则
+
+目录真源见 [目录落点.md](../../docs/共同维护/技术设计/目录落点.md)。
+
+## 必须执行
+
+- 新文件先判断 owner：protocol / companion / openclaw-adapter / docs / scripts。
+- 同类文件必须收纳到职责目录，禁止靠长文件名前缀代替目录。
+- 同目录源文件达到 4 个且职责组达到 2 个时，必须拆子目录。
+- 测试文件必须进入 `tests/`，不得与业务源码平放。
+- 移动文件必须同步更新 import 并删除旧路径；默认不保留兼容转发壳。
+- 包根 `src/index.ts` 可以作为公共门面；内部目录默认禁止 barrel。
+
+## 默认执行
+
+- `packages/protocol/src/` 只放 messages / schemas / validators / states / errors / ids。
+- `packages/openclaw-adapter/src/` 只放 client / jobs / status / mapping。
+- `apps/companion/src/` 按 bridge / pairing / permissions / credentials / jobs / chat / ui 分区。

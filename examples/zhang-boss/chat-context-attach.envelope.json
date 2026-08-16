@@ -1,0 +1,23 @@
+{
+  "protocolVersion": "0.1",
+  "messageId": "msg_chat_context_attach_001",
+  "correlationId": "msg_chat_message_001",
+  "sentAt": "2026-07-23T01:03:00.000Z",
+  "source": {
+    "kind": "companion",
+    "deviceId": "desktop_liao_pc"
+  },
+  "target": {
+    "kind": "phone",
+    "deviceId": "phone_lanxing_001"
+  },
+  "type": "chat.context_attach",
+  "payload": {
+    "attachId": "attach_001",
+    "text": "F:/workspace/xxx/src/parser.ts",
+    "target": "affair",
+    "affairId": "affair_fix_code_001",
+    "contentKind": "path",
+    "sentAt": "2026-07-23T01:03:00.000Z"
+  }
+}

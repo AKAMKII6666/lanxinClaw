@@ -1,0 +1,42 @@
+---
+description: 状态机、异步消息和高风险状态推进的携证状态转移规则
+alwaysApply: true
+---
+
+# 携证状态转移
+
+原则真源见 [携证状态转移原则.md](../../docs/共同维护/技术设计/携证状态转移原则.md)。
+
+## 触发范围
+
+设计或修改以下内容时，必须按携证状态转移原则检查：
+
+- pairing / session / affair / job / permission 状态机；
+- phone ↔ companion、companion ↔ adapter、adapter ↔ OpenClaw runtime 的异步消息；
+- cancel、resume、retry、close、permission decision 等操作能力；
+- 权限门（permission gate）、工作区范围（workspace scope）、设备身份（device identity）与凭据状态（credential status）；
+- mock / local-safe / real Gateway 或 SDK 的切换；
+- 协议文档、schema、examples、mapper、mock、tests 的同步。
+
+## 必须执行
+
+- 高风险状态推进必须携带并验证身份、对象、当前上下文、前置状态和操作能力。
+- 跨边界消息必须能用 `messageId`、`correlationId`、`affairId`、`jobId`、`permissionRequestId` 或 session identity 关联和去重。
+- 终态必须单调；`closed`、`canceled`、revoked identity、job 终态不得被迟到事件复活。
+- `job.completed` 只能推动 affair 进入 `waiting_acceptance`；不得自动写 `closed`。
+- 桌面副作用必须先经过 companion permission gate，再委派 adapter 或 runtime。
+- Mock 只能用于明确测试/演示入口；不得在真实运行故障时静默降级成 mock 并报告成功。
+- 高风险链路必须包含反例测试，覆盖重复、迟到、取消、权限缺失、scope 越界和非法状态迁移。
+- 关键状态转移必须可追踪且脱敏，不得记录 API key、token、pairing secret、私钥或完整 secret。
+
+## 禁止事项
+
+- 不得只靠 UI 文案、按钮可见性、本地缓存或“刚收到消息”推进高风险状态。
+- 不得新增无人读取、无人校验、无人审计的证据字段来制造安全感。
+- 不得把 adapter / OpenClaw runtime 的 worker 状态当成 affair 事实真源。
+- 不得把 renderer、phone 或 mock 的状态反向覆盖 companion 权限事实。
+- 不得为了低风险局部逻辑机械引入复杂代际模型。
+
+## 冲突处理
+
+若原则与当前协议、实现成本或阶段范围有张力，先呈现冲突、风险、补偿控制和选项；由安全边界、协议兼容性、状态机正确性优先裁决。

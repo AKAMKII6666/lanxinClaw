@@ -1,0 +1,24 @@
+{
+  "name": "@lanxin-claw/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "澜星 Claw 共享协议 types / validators / message helpers / errors / ids",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0"
+  }
+}

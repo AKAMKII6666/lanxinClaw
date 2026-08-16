@@ -1,0 +1,20 @@
+---
+description: OpenClaw 集成与 adapter 边界
+alwaysApply: true
+---
+
+# OpenClaw Adapter 边界
+
+## 必须执行
+
+- OpenClaw 是执行 worker，不是张老板人格或事务 owner。
+- Adapter 只翻译 Lanxing job 与 OpenClaw run/status，不拥有配对、凭据授权或事务关闭。
+- 修改 OpenClaw core 前必须先确认没有可用扩展点或外部 adapter 方案。
+- 对 OpenClaw core 的 patch 必须小、可解释、可回滚，并在 docs 中记录原因。
+
+## 默认执行
+
+- 先用 mock OpenClaw runtime 建 contract test。
+- 先支持最窄 MVP：创建 job、查询状态、取消 job、返回 blocked/completed。
+- 避免依赖 OpenClaw 未公开的内部对象；若必须依赖，写清版本与风险。
+

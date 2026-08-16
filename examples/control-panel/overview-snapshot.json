@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "0.1",
+  "snapshotId": "ui_snap_overview_001",
+  "generatedAt": "2026-07-23T01:00:00.000Z",
+  "companion": {
+    "status": "running",
+    "version": "0.1.0-dev",
+    "uptimeMs": 120000,
+    "message": null
+  },
+  "clawCore": {
+    "status": "running",
+    "version": "mock",
+    "adapterReady": true,
+    "message": null
+  },
+  "credential": {
+    "status": "synced",
+    "provider": "openclaw-api",
+    "lastSyncedAt": "2026-07-23T00:50:00.000Z",
+    "expiresAt": null,
+    "message": null
+  },
+  "device": {
+    "status": "connected",
+    "phoneDeviceId": "phone_lanxing_001",
+    "phoneDisplayName": "澜星电话 LxPhone-01",
+    "pairingId": "pair_001",
+    "sessionId": "sess_001",
+    "fingerprintHint": "8F:2A:…",
+    "lastSeenAt": "2026-07-23T01:00:00.000Z",
+    "message": null
+  },
+  "zhangBoss": {
+    "status": "supervising",
+    "activeAffairId": "affair_fix_code_001",
+    "activeCallId": null,
+    "summary": "正在盯「修好 xxx 项目代码问题」"
+  },
+  "currentAffair": {
+    "affairId": "affair_fix_code_001",
+    "title": "修好 xxx 项目代码问题",
+    "status": "running",
+    "currentJobId": "job_fix_code_001",
+    "executor": "openclaw",
+    "progressSummary": "已定位失败用例，正在尝试修复",
+    "blockedReason": null,
+    "resumeCondition": null,
+    "updatedAt": "2026-07-23T00:59:00.000Z"
+  }
+}

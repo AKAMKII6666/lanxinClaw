@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/affair.schema.json",
+  "title": "Lanxing Affair",
+  "type": "object",
+  "required": ["affairId", "title", "ownerAgent", "status", "context", "acceptanceCriteria"],
+  "properties": {
+    "affairId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ownerAgent": {
+      "type": "string",
+      "const": "zhang-boss"
+    },
+    "status": {
+      "enum": ["clarifying", "ready", "delegated", "running", "blocked", "paused", "waiting_acceptance", "closed", "canceled"]
+    },
+    "context": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptanceCriteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blockedReason": {
+      "type": ["string", "null"]
+    },
+    "resumeCondition": {
+      "type": ["string", "null"]
+    },
+    "currentJobId": {
+      "type": ["string", "null"]
+    }
+  },
+  "additionalProperties": false
+}
+

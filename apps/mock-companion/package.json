@@ -1,0 +1,30 @@
+{
+  "name": "@lanxin-claw/mock-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "本地 HTTP/WebSocket mock companion：配对、affair/job 事件流与控制面板 UI 契约",
+  "exports": {
+    ".": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "@lanxin-claw/protocol": "0.1.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.0"
+  }
+}
