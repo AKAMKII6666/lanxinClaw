@@ -60,8 +60,7 @@ export {
 } from "./client/gateway/fake/transport.js";
 export {
   createRawWebSocketGatewayTransport,
-  type RawGatewayMethodNames,
-  type RawWebSocketGatewayTransportOptions,
+    type RawWebSocketGatewayTransportOptions,
 } from "./client/gateway/raw-ws/transport.js";
 
 export {

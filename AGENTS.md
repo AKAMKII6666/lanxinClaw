@@ -19,7 +19,8 @@
 
 - 已定义协议、状态机、安全边界和文档结构。
 - 已落地 companion shell / bridge / OpenClaw adapter 的 MVP 壳与契约验证。
-- 后续按需要接真实 OpenClaw Gateway / SDK；如需 patch `openclaw/openclaw`，必须保持最小、可解释、可回滚。
+- 联调前置收口已落地：pino 模块化日志、session 门闩、授权后自动委派（JobDelegator）、自托管 OpenClaw 运行时（隔离环境变量 + 协议 v4 校准）、首次启动 onboarding 配置门；协议出站（permission/chat/resume）、监督 loop、控制面板 live snapshot 与托盘常驻已接线。日常入口 `npm run start:companion`。真机 phone 联调验收见 `docs/共同维护/计划/phone联调验收矩阵.md`。
+- 如需 patch `openclaw/openclaw`，必须保持最小、可解释、可回滚。
 
 ## 必读文档
 

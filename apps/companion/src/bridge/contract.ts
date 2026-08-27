@@ -22,7 +22,79 @@ export const BRIDGE_CHANNELS = {
   listPendingPermissions: "lanxin:bridge:listPendingPermissions",
   /** 拉取诊断报告（只读；不含凭据明文） */
   getDiagnosticReport: "lanxin:bridge:getDiagnosticReport",
+  /** renderer 上报日志（只读；仅允许 ui 模块，写入 pino） */
+  log: "lanxin:bridge:log",
+  /** 拉取 onboarding 状态 */
+  onboardingStatus: "lanxin:bridge:onboardingStatus",
+  /** 提交 onboarding 配置并执行探针 */
+  onboardingSubmit: "lanxin:bridge:onboardingSubmit",
+  /** 已配置冷启动：拉起运行时并探针 */
+  onboardingBootstrapRuntime: "lanxin:bridge:onboardingBootstrapRuntime",
+  /** 清除 onboarding 配置 */
+  onboardingClear: "lanxin:bridge:onboardingClear",
+  /** 提交/冷启动阶段进度（main → renderer） */
+  onboardingProgress: "lanxin:bridge:onboardingProgress",
 } as const;
+
+/** onboarding 提交阶段 */
+export type OnboardingPhase = "verifying_key" | "starting_runtime";
+
+/** renderer 可上报的日志级别 */
+export const RENDERER_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+
+/** renderer 日志级别 */
+export type RendererLogLevel = (typeof RENDERER_LOG_LEVELS)[number];
+
+/** renderer 日志 message 最大长度 */
+export const RENDERER_LOG_MAX_MESSAGE_LENGTH = 2000;
+
+/** renderer 日志 meta 最大序列化深度 */
+export const RENDERER_LOG_MAX_META_DEPTH = 3;
+
+/**
+ * Renderer 上报的日志条目。
+ * 仅允许 module="ui"，防止伪造其它模块日志；message 视为 untrusted 文本。
+ */
+export interface RendererLogEntry {
+  /** 固定为 ui */
+  module: "ui";
+  /** 日志级别 */
+  level: RendererLogLevel;
+  /** 短说明；不得粘贴凭据 */
+  message: string;
+  /** 可选结构化元数据；深度受限 */
+  meta?: unknown;
+}
+
+/** renderer 可见的 onboarding 状态 */
+export interface OnboardingStatusView {
+  /** 状态 */
+  status: "unconfigured" | "configuring" | "ready" | "failed";
+  /** 最近失败原因；可空 */
+  lastError: { code: string; message: string } | null;
+}
+
+/** renderer 提交的 onboarding 配置 */
+export interface OnboardingSubmitPayload {
+  /** provider 标识 */
+  provider: "qwen" | "openai" | "anthropic" | "openai-compatible" | "local";
+  /** 模型 API key；local 可为空 */
+  apiKey: string;
+  /** 兼容端点；可空 */
+  endpoint?: string | null;
+  /** 模型引用 */
+  modelRef: string;
+}
+
+/** onboarding 提交结果（renderer 可见） */
+export interface OnboardingSubmitResult {
+  /** 是否成功 */
+  ok: boolean;
+  /** 失败原因；可空 */
+  error?: BridgeError;
+  /** 提交后的状态 */
+  status: OnboardingStatusView;
+}
 
 /** 控制面板页面导航目标 */
 export type BridgeNavPage =
@@ -270,4 +342,50 @@ export interface ControlPanelSnapshotView {
   zhangBoss: ZhangBossStatusView;
   /** 当前事务；无则为 null */
   currentAffair: CurrentAffairSummaryView | null;
+  /** 精确文本侧写；可空（旧 snapshot 可无此字段） */
+  sideChannel?: SnapshotSideChannelView;
+}
+
+/**
+ * snapshot 侧写消息；text 视为 untrusted。
+ */
+export interface SnapshotSideChannelMessageView {
+  /** 协议 chatMessageId */
+  messageId: string;
+  /** 作者种类 */
+  authorKind: string;
+  /** 正文；untrusted */
+  text: string;
+  /** 发送时间 */
+  sentAt: string;
+}
+
+/**
+ * snapshot 侧写附件。
+ */
+export interface SnapshotSideChannelAttachView {
+  /** attachId */
+  attachId: string;
+  /** 附加文本；untrusted */
+  text: string;
+  /** 内容种类 */
+  contentKind: string;
+  /** 目标标签 */
+  targetLabel: string;
+  /** 投递通道标签 */
+  deliveryLabel: string;
+  /** 附加时间 */
+  attachedAt: string;
+}
+
+/**
+ * 精确文本与 pending 队列摘要。
+ */
+export interface SnapshotSideChannelView {
+  /** 待张老板 FC 消费的条数 */
+  pendingContextCount: number;
+  /** 线程消息 */
+  messages: SnapshotSideChannelMessageView[];
+  /** 附加历史 */
+  attachments: SnapshotSideChannelAttachView[];
 }

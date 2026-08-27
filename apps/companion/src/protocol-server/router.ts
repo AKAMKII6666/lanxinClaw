@@ -10,7 +10,6 @@ import { type WebSocket } from "ws";
 import {
   createEnvelope,
   validateMessage,
-  type JobPayload,
   type PairingConfirmedPayload,
   type ProtocolEnvelope,
   type SessionOpenPayload,
@@ -21,8 +20,12 @@ import {
   handlePhoneConfirmed,
 } from "../pairing/lifecycle.js";
 import type { PairingSession } from "../pairing/session.js";
-import { enqueueJobPermission } from "./job-permission.js";
+import { validateInboundAuth, isRequiresSessionType, validateInboundIdentity } from "./guards/inbound/inbound-auth.js";
+import { validateInboundFromPhone } from "./guards/inbound/message-direction.js";
+import type { ApplyProtocolResult } from "../state/types.js";
 import type { CompanionProtocolServerOptions } from "./server.js";
+import { handleJobCancel, handleJobCreate } from "./handlers/job-handlers.js";
+import { sendJson } from "./router-utils.js";
 
 /**
  * WS 消息处理入参。
@@ -32,14 +35,20 @@ export interface HandleProtocolSocketMessageInput {
   options: CompanionProtocolServerOptions;
   /** 原始文本 */
   text: string;
-  /** 出站广播 */
-  broadcast: (envelope: ProtocolEnvelope) => void;
+  /** 出站广播（apply + send） */
+  broadcast: (envelope: ProtocolEnvelope) => ApplyProtocolResult;
+  /** 仅 WS 发送 */
+  sendEnvelope: (envelope: ProtocolEnvelope) => void;
   /** socket */
   socket: WebSocket;
   /** 读取 pending pairing */
   getPending: () => PairingSession | null;
   /** 保存 pending pairing */
   setPending: (session: PairingSession) => void;
+  /** session.open 成功后标记该 socket 已认证 */
+  markSocketAuthenticated?: (socket: WebSocket) => void;
+  /** 该 socket 是否已认证 */
+  isSocketAuthenticated?: () => boolean;
 }
 
 /**
@@ -54,6 +63,27 @@ export async function handleProtocolSocketMessage(
   if (!parsed) {
     return;
   }
+  const direction = validateInboundFromPhone(parsed);
+  if (!direction.ok) {
+    sendJson(input.socket, { ok: false, error: direction });
+    return;
+  }
+  const auth = validateInboundAuth(parsed.type, input.isSocketAuthenticated?.() ?? false);
+  if (!auth.ok) {
+    sendJson(input.socket, { ok: false, error: auth });
+    return;
+  }
+  if (isRequiresSessionType(parsed.type)) {
+    const identity = validateInboundIdentity(
+      parsed,
+      input.options.backend.getState().connection,
+      input.options.pairing.desktopDeviceId,
+    );
+    if (!identity.ok) {
+      sendJson(input.socket, { ok: false, error: identity });
+      return;
+    }
+  }
   if (parsed.type === "pairing.request") {
     handlePairingRequest(input, parsed);
     return;
@@ -63,24 +93,15 @@ export async function handleProtocolSocketMessage(
     return;
   }
   if (parsed.type === "session.open") {
-    await handleSessionOpen(input.options, parsed, input.broadcast, input.socket);
+    await handleSessionOpen(input, parsed);
     return;
   }
   if (parsed.type === "job.create") {
-    const queued = enqueueJobPermission(input.options, parsed);
-    if (!queued.ok) {
-      sendJson(input.socket, { ok: false, error: queued });
-      return;
-    }
-    applyToBackend(
-      input.options,
-      {
-        ...parsed,
-        type: "job.needs_permission",
-        payload: { ...(parsed.payload as unknown as JobPayload), status: "needs_permission" },
-      },
-      input.socket,
-    );
+    await handleJobCreate(input, parsed);
+    return;
+  }
+  if (parsed.type === "job.cancel") {
+    await handleJobCancel(input, parsed);
     return;
   }
   applyToBackend(input.options, parsed, input.socket);
@@ -98,7 +119,7 @@ export async function approvePendingPairing(
   options: CompanionProtocolServerOptions,
   pending: PairingSession | null,
   pairingId: string,
-  broadcast: (envelope: ProtocolEnvelope) => void,
+  broadcast: (envelope: ProtocolEnvelope) => ApplyProtocolResult,
 ): Promise<void> {
   if (!pending || pending.pairingId !== pairingId) {
     throw new Error("pairing_not_found");
@@ -185,20 +206,19 @@ function handlePairingConfirmedMessage(
  * 处理 session.open。
  */
 async function handleSessionOpen(
-  options: CompanionProtocolServerOptions,
+  input: HandleProtocolSocketMessageInput,
   envelope: ProtocolEnvelope,
-  broadcast: (envelope: ProtocolEnvelope) => void,
-  socket: WebSocket,
 ): Promise<void> {
   const payload = envelope.payload as unknown as SessionOpenPayload;
-  const auth = await options.identityStore.authenticateReconnect(payload);
+  const auth = await input.options.identityStore.authenticateReconnect(payload);
   if (!auth.ok) {
-    broadcastReauthRequired(payload, envelope.messageId, auth, broadcast);
-    sendJson(socket, { ok: false, error: { code: "session_reauth_required", message: auth.reason, retryable: false } });
+    broadcastReauthRequired(payload, envelope.messageId, auth, input.broadcast);
+    sendJson(input.socket, { ok: false, error: { code: "session_reauth_required", message: auth.reason, retryable: false } });
     return;
   }
-  options.backend.applyProtocolEnvelope(envelope);
-  broadcast(createEnvelope({
+  input.options.backend.applyProtocolEnvelope(envelope);
+  input.markSocketAuthenticated?.(input.socket);
+  input.broadcast(createEnvelope({
     source: { kind: "companion", deviceId: payload.desktopDeviceId },
     target: { kind: "phone", deviceId: payload.phoneDeviceId },
     type: "session.accepted",
@@ -209,6 +229,7 @@ async function handleSessionOpen(
       heartbeatIntervalMs: 5000,
     },
   }));
+  input.options.onSessionAccepted?.();
 }
 
 /**
@@ -218,7 +239,7 @@ function broadcastReauthRequired(
   payload: SessionOpenPayload,
   correlationId: string,
   auth: { reason: string; requiredAction: "reopen" | "repair" },
-  broadcast: (envelope: ProtocolEnvelope) => void,
+  broadcast: (envelope: ProtocolEnvelope) => ApplyProtocolResult,
 ): void {
   broadcast(createEnvelope({
     source: { kind: "companion", deviceId: payload.desktopDeviceId },
@@ -241,17 +262,26 @@ function applyToBackend(
   envelope: ProtocolEnvelope,
   socket: WebSocket,
 ): void {
-  const applied = options.backend.applyProtocolEnvelope(envelope);
+  let normalized = envelope;
+  if (envelope.type === "chat.message" && envelope.source.kind === "phone") {
+    normalized = {
+      ...envelope,
+      payload: { ...envelope.payload as object, authorKind: "user" },
+    } as ProtocolEnvelope;
+  }
+  const applied = options.backend.applyProtocolEnvelope(normalized);
   if (!applied.ok) {
     sendJson(socket, { ok: false, error: applied });
+    return;
   }
+  sendJson(socket, {
+    ok: true,
+    acceptedType: envelope.type,
+    ...(applied.duplicate ? { duplicate: true } : {}),
+  });
 }
 
 /**
  * 发送 JSON。
  */
-function sendJson(socket: WebSocket, body: unknown): void {
-  if (socket.readyState === socket.OPEN) {
-    socket.send(JSON.stringify(body));
-  }
-}
+export { sendJson } from "./router-utils.js";

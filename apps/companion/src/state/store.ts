@@ -13,6 +13,7 @@ import {
   type AffairPayload,
   type ChatContextAttachPayload,
   type ChatMessagePayload,
+  type ChatReadReceiptPayload,
   type JobPayload,
   type ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
@@ -41,6 +42,7 @@ export function createCompanionBackendState(startedAtMs = Date.now()): Companion
     jobs: new Map(),
     chatMessages: [],
     contextAttachments: [],
+    chatReceipts: [],
     auditRecords: [],
     lastError: null,
     seenMessages: new Map(),
@@ -108,6 +110,15 @@ function applyValidatedEnvelope(
     state.connection.lastSeenAt = now;
     return { ok: true, envelope };
   }
+  if (envelope.type === "session.heartbeat") {
+    state.connection.lastSeenAt = now;
+    return { ok: true, envelope };
+  }
+  if (envelope.type === "session.closed") {
+    state.connection.sessionAuthenticated = false;
+    state.connection.lastSeenAt = now;
+    return { ok: true, envelope };
+  }
   if (envelope.type.startsWith("affair.")) {
     return applyAffair(state, envelope, now);
   }
@@ -120,6 +131,10 @@ function applyValidatedEnvelope(
   }
   if (envelope.type === "chat.context_attach") {
     state.contextAttachments.push(envelope.payload as unknown as ChatContextAttachPayload);
+    return { ok: true, envelope };
+  }
+  if (envelope.type === "chat.read_receipt") {
+    state.chatReceipts.push(envelope.payload as unknown as ChatReadReceiptPayload);
     return { ok: true, envelope };
   }
   return { ok: true, envelope };
@@ -166,6 +181,9 @@ function applyJob(
   envelope: ProtocolEnvelope,
   now: string,
 ): ApplyProtocolResult {
+  if (envelope.type === "job.cancel") {
+    return applyJobCancel(state, envelope, now);
+  }
   const payload = envelope.payload as unknown as JobPayload;
   const existing = state.jobs.get(payload.jobId);
   if (existing && !canTransitionJobStatus(existing.status, payload.status)) {
@@ -181,6 +199,46 @@ function applyJob(
   const affair = state.affairs.get(payload.affairId);
   if (affair) {
     updateAffairFromJob(state, affair, payload);
+  }
+  return { ok: true, envelope };
+}
+
+/**
+ * 应用 job.cancel 事件。
+ *
+ * @param state state
+ * @param envelope envelope
+ * @param now 时间
+ * @returns 结果
+ */
+function applyJobCancel(
+  state: CompanionBackendState,
+  envelope: ProtocolEnvelope,
+  now: string,
+): ApplyProtocolResult {
+  const payload = envelope.payload as unknown as { jobId: string; affairId: string };
+  const existing = state.jobs.get(payload.jobId);
+  if (!existing) {
+    return fail("job_not_found", `找不到 jobId=${payload.jobId}`, false, state, now);
+  }
+  if (!canTransitionJobStatus(existing.status, "canceled")) {
+    return fail(
+      "job_illegal_transition",
+      `job 状态不可从 ${existing.status} 迁到 canceled`,
+      false,
+      state,
+      now,
+    );
+  }
+  const canceled: JobPayload = {
+    ...existing,
+    status: "canceled",
+    progressSummary: existing.progressSummary || "canceled_by_phone",
+  };
+  state.jobs.set(payload.jobId, canceled);
+  const affair = state.affairs.get(payload.affairId);
+  if (affair) {
+    updateAffairFromJob(state, affair, canceled);
   }
   return { ok: true, envelope };
 }
@@ -227,7 +285,7 @@ function fail(
   state: CompanionBackendState,
   now: string,
 ): ApplyProtocolResult {
-  state.lastError = { code, message, occurredAt: now };
+  state.lastError = { code, message, occurredAt: now, affairId: null, jobId: null };
   return { ok: false, code, message, retryable };
 }
 

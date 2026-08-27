@@ -32,13 +32,18 @@ export function DiagnosticsPage(props: { bridge: RendererBridgeApi }): ReactElem
 
   useEffect(() => {
     let cancelled = false;
-    void props.bridge.getDiagnosticReport().then((next) => {
-      if (!cancelled) {
-        setReport(next);
-      }
-    });
+    function load(): void {
+      void props.bridge.getDiagnosticReport().then((next) => {
+        if (!cancelled) {
+          setReport(next);
+        }
+      });
+    }
+    load();
+    const timer = setInterval(load, 3_000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [props.bridge]);
 

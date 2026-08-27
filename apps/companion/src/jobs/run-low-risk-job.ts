@@ -6,7 +6,6 @@
  * 副作用：消耗 gate 授予；调用 runtime（本机只读 fs/git 或 mock）。
  */
 
-import path from "node:path";
 import {
   OpenClawAdapter,
   buildLowRiskGoal,
@@ -20,6 +19,7 @@ import type {
   RunLowRiskJobInput,
   RunLowRiskJobSuccess,
 } from "./types.js";
+import { resolveAuthorizedWorkspaceRoot } from "./workspace-scope.js";
 
 /**
  * 编排依赖。
@@ -75,7 +75,7 @@ export async function runLowRiskJob(
     }
   }
 
-  const scopedRoot = resolveAuthorizedWorkspaceRoot(deps.gate, input);
+  const scopedRoot = resolveJobWorkspaceRoot(deps.gate, input);
   if (!scopedRoot.ok) {
     return scopedRoot;
   }
@@ -120,50 +120,15 @@ export async function runLowRiskJob(
  * @param input 编排入参
  * @returns 授权范围内的绝对根，或失败
  */
-function resolveAuthorizedWorkspaceRoot(
+function resolveJobWorkspaceRoot(
   gate: PermissionGate,
   input: RunLowRiskJobInput,
 ): { ok: true; workspaceRoot: string | null } | RunLowRiskJobFailure {
   const request = gate.getRequest(input.permissionRequestId);
-  const authorizedHint = request?.proposedScope.workspaceRoot?.trim() || null;
-  const runHint = input.workspaceRoot?.trim() || null;
-
-  if (!authorizedHint) {
-    return { ok: true, workspaceRoot: runHint };
-  }
-
-  const authorizedRoot = path.resolve(authorizedHint);
-  if (!runHint) {
-    return { ok: true, workspaceRoot: authorizedRoot };
-  }
-
-  const candidate = path.isAbsolute(runHint)
-    ? path.normalize(runHint)
-    : path.resolve(authorizedRoot, runHint);
-  if (!isPathInsideOrEqual(authorizedRoot, candidate)) {
-    return {
-      ok: false,
-      code: "workspace_scope_mismatch",
-      message: "workspaceRoot 超出 permission.request 的 proposedScope.workspaceRoot",
-    };
-  }
-  return { ok: true, workspaceRoot: candidate };
-}
-
-/**
- * @param base 授权根
- * @param candidate 候选路径
- * @returns 是否在范围内
- */
-function isPathInsideOrEqual(base: string, candidate: string): boolean {
-  const rel = path.relative(base, candidate);
-  if (!rel) {
-    return true;
-  }
-  if (path.isAbsolute(rel)) {
-    return false;
-  }
-  return rel.split(/[/\\]/)[0] !== "..";
+  return resolveAuthorizedWorkspaceRoot(
+    request?.proposedScope.workspaceRoot,
+    input.workspaceRoot,
+  );
 }
 
 /**

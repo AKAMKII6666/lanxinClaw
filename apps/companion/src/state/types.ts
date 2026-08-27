@@ -10,6 +10,7 @@ import type {
   AffairPayload,
   ChatContextAttachPayload,
   ChatMessagePayload,
+  ChatReadReceiptPayload,
   JobPayload,
   ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
@@ -61,10 +62,20 @@ export interface CompanionBackendState {
   chatMessages: ChatMessagePayload[];
   /** context_attach 消息 */
   contextAttachments: ChatContextAttachPayload[];
+  /** 已读回执 */
+  chatReceipts: ChatReadReceiptPayload[];
   /** audit 视图 */
   auditRecords: AuditRecordView[];
   /** 最近错误 */
-  lastError: { code: string; message: string; occurredAt: string } | null;
+  lastError: {
+    code: string;
+    message: string;
+    occurredAt: string;
+    /** 关联事务 */
+    affairId?: string | null;
+    /** 关联 job */
+    jobId?: string | null;
+  } | null;
   /** 已处理消息 */
   seenMessages: Map<string, SeenMessageRecord>;
 }

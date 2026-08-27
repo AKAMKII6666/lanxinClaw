@@ -89,6 +89,7 @@ export async function createAdapterJob(
   try {
     const snapshot = await runtime.createRun({
       input: input.goal,
+      idempotencyKey: `lanxing-job:${input.jobId}`,
       workspaceHint: input.workspaceHint ?? null,
       sessionKey: `lanxing-job:${input.jobId}`,
     });
@@ -110,12 +111,41 @@ export async function createAdapterJob(
     store.set(job);
     return { ok: true, job };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "create_run_failed";
+    const gateway = runtimeErrorResult(err, "create_run_failed");
     return {
       ok: false,
-      code: "runtime_create_failed",
-      message,
-      retryable: true,
+      code: gateway.code,
+      message: gateway.message,
+      retryable: gateway.retryable,
     };
   }
+}
+
+function runtimeErrorResult(err: unknown, fallbackMessage: string): { code: string; message: string; retryable: boolean } {
+  if (err && typeof err === "object") {
+    const typed = err as { code?: unknown; message?: unknown; retryable?: unknown };
+    if (typeof typed.code === "string" && typed.code.startsWith("gateway_")) {
+      return {
+        code: typed.code,
+        message: typeof typed.message === "string" ? typed.message : fallbackMessage,
+        retryable: typeof typed.retryable === "boolean" ? typed.retryable : isRetryableGatewayCode(typed.code),
+      };
+    }
+  }
+  const message = err instanceof Error ? err.message : fallbackMessage;
+  if (message.startsWith("gateway_")) {
+    return { code: message, message, retryable: isRetryableGatewayCode(message) };
+  }
+  return { code: "runtime_create_failed", message, retryable: true };
+}
+
+function isRetryableGatewayCode(code: string): boolean {
+  return ![
+    "gateway_url_missing",
+    "gateway_agent_missing",
+    "gateway_scope_missing",
+    "gateway_auth_missing",
+    "gateway_connect_rejected",
+    "gateway_invalid_run",
+  ].includes(code);
 }

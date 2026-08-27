@@ -86,6 +86,24 @@ describe("context delivery + pending", () => {
       assert.equal(q.take(ok.item.pendingId)?.text, "F:/a.ts");
     }
   });
+
+  it("drain / restore 可往返", () => {
+    const q = createPendingContextQueue();
+    assert.equal(
+      q.enqueue({
+        text: "note",
+        contentKind: "note",
+        target: "affair",
+        affairId: "affair_1",
+      }).ok,
+      true,
+    );
+    const drained = q.drain();
+    assert.equal(drained.length, 1);
+    assert.equal(q.list().length, 0);
+    q.restore(drained);
+    assert.equal(q.list().length, 1);
+  });
 });
 
 describe("reconnect + autostart", () => {

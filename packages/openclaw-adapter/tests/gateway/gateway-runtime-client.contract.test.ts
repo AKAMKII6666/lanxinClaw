@@ -98,6 +98,28 @@ describe("gateway runtime client contract", () => {
     );
   });
 
+  it("adapter 保留 Gateway 配置错误码与 retryable=false", async () => {
+    const runtime = createGatewayRuntimeClient({
+      gatewayUrl: "",
+      agentId: "main",
+      defaultScopes: ["workspace.read"],
+      authProvider: () => "test-token",
+      transport: createFakeGatewayTransport().transport,
+    });
+    const adapter = new OpenClawAdapter({ runtime });
+    const created = await adapter.createJob({
+      jobId: "job_gateway_error_001",
+      affairId: "affair_gateway_error_001",
+      goal: "Gateway error shape",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, false);
+    if (!created.ok) {
+      assert.equal(created.code, "gateway_url_missing");
+      assert.equal(created.retryable, false);
+    }
+  });
+
   it("未注入 transport 时默认 raw WS，失败也不回退 mock", async () => {
     const runtime = createGatewayRuntimeClient({
       gatewayUrl: "ws://127.0.0.1:18789",

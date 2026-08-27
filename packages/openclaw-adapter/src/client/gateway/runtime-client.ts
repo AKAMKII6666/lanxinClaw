@@ -70,6 +70,7 @@ export function createGatewayRuntimeClient(
       return sanitizeSnapshot(
         await transport.createRun({
           agentId,
+          idempotencyKey: params.idempotencyKey ?? null,
           input: params.input,
           sessionKey,
           workspaceHint: params.workspaceHint ?? null,

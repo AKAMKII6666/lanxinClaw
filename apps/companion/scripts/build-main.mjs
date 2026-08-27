@@ -1,7 +1,7 @@
 /**
  * 构建 Electron main 产物：打包 main-entry 并复制 preload。
  *
- * 职责：产出 dist/main/main-entry.cjs 与 preload.cjs。
+ * 职责：产出 dist/main/main-entry.cjs、preload.cjs 与 icons。
  * 不拥有：renderer Vite 构建。
  * 副作用：写 dist/main。
  */
@@ -38,4 +38,12 @@ await esbuild.build({
 });
 
 copyFileSync(preloadSrc, path.join(outDir, "preload.cjs"));
+
+const iconsSrc = path.join(companionRoot, "src", "shell", "desktop", "icons");
+const iconsDest = path.join(outDir, "icons");
+mkdirSync(iconsDest, { recursive: true });
+for (const name of ["app.ico", "app.png"]) {
+  copyFileSync(path.join(iconsSrc, name), path.join(iconsDest, name));
+}
+
 process.stdout.write(`[build-main] ok -> ${outDir}\n`);

@@ -18,6 +18,8 @@
     "test:companion": "npm run test -w @lanxin-claw/companion",
     "demo:low-risk-job": "npm run demo:low-risk -w @lanxin-claw/companion",
     "smoke:gateway": "tsx scripts/gateway/run-gateway-smoke.ts",
+    "logs:ls": "node scripts/logs/ls-logs.mjs",
+    "logs:tail": "node scripts/logs/tail-log.mjs",
     "e2e:real-companion": "tsx scripts/sim-phone/run-real-companion-loop.ts",
     "e2e:v1.3": "npm run e2e:v1.3 -w @lanxin-claw/companion",
     "dev:companion": "npm run dev:shell -w @lanxin-claw/companion",

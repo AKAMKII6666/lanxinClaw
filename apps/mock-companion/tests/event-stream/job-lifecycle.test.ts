@@ -135,6 +135,43 @@ async function pairAndOpenSession(
 }
 
 /**
+ * 通过 mock 桌面 HTTP 授予权限。
+ *
+ * @param baseUrl mock companion 根 URL
+ * @param permissionRequestId 权限请求 id
+ * @param decision 决策
+ */
+async function grantMockPermission(
+  baseUrl: string,
+  permissionRequestId: string,
+  decision = "allow_for_job",
+): Promise<void> {
+  const res = await fetch(`${baseUrl}/ui/permission-decide`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ permissionRequestId, decision }),
+  });
+  assert.equal(res.status, 200, `授权失败: ${await res.text()}`);
+}
+
+/**
+ * job.create 后等待 needs_permission 并模拟桌面授权。
+ *
+ * @param events 事件列表
+ * @param baseUrl mock companion 根 URL
+ */
+async function waitNeedsPermissionAndGrant(
+  events: ProtocolEnvelope[],
+  baseUrl: string,
+): Promise<void> {
+  await waitForEvent(events, (e) => e.type === "job.needs_permission", 5_000);
+  const perm = await waitForEvent(events, (e) => e.type === "permission.request", 5_000);
+  const permissionRequestId = (perm.payload as { permissionRequestId?: string }).permissionRequestId;
+  assert.ok(permissionRequestId);
+  await grantMockPermission(baseUrl, permissionRequestId!);
+}
+
+/**
  * 创建 affair，等待 update 后再创建 job。
  *
  * @param ws WebSocket
@@ -242,6 +279,7 @@ describe("mock companion 事件流", () => {
       const affairId = createAffairId();
       const jobId = createJobId();
       await createAffairAndJob(ws, events, desktopId, affairId, jobId);
+      await waitNeedsPermissionAndGrant(events, companion.baseUrl);
 
       await waitForEvent(events, (e) => e.type === "job.accepted", 5_000);
       await waitForEvent(events, (e) => e.type === "job.progress", 5_000);
@@ -287,6 +325,7 @@ describe("mock companion 事件流", () => {
       const desktopId = companion.config.desktopDeviceId;
       await pairAndOpenSession(ws, events, desktopId);
       await createAffairAndJob(ws, events, desktopId, createAffairId(), createJobId());
+      await waitNeedsPermissionAndGrant(events, companion.baseUrl);
 
       await waitForEvent(events, (e) => e.type === "job.progress", 5_000);
       const blocked = await waitForEvent(events, (e) => e.type === "job.blocked", 5_000);

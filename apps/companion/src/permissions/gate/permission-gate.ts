@@ -39,6 +39,16 @@ export class PermissionGate {
   #queueStatus = new Map<string, PermissionQueueStatus>();
   #grants: PermissionGrantRecord[] = [];
   #grantSeq = 0;
+  #onChange: (() => void) | null = null;
+
+  /**
+   * 落盘回调；hydrate 后的变更会触发。
+   *
+   * @param onChange 变更回调
+   */
+  setOnChange(onChange: (() => void) | null): void {
+    this.#onChange = onChange;
+  }
 
   /**
    * 将请求入队；重复 id 拒绝。
@@ -56,6 +66,7 @@ export class PermissionGate {
     }
     this.#requests.set(request.permissionRequestId, request);
     this.#queueStatus.set(request.permissionRequestId, "pending");
+    this.#onChange?.();
     return { ok: true };
   }
 
@@ -84,13 +95,15 @@ export class PermissionGate {
     }
     const normalized: PermissionDecision = isPermissionDecision(decision) ? decision : "deny";
     const at = decidedAt ?? new Date().toISOString();
-    return applyPermissionDecision(
+    const result = applyPermissionDecision(
       { queueStatus: this.#queueStatus, grants: this.#grants },
       request,
       normalized,
       at,
       () => this.#nextGrantId(),
     );
+    this.#onChange?.();
+    return result;
   }
 
   /**
@@ -135,8 +148,26 @@ export class PermissionGate {
     }
     if (grant.scope === "once") {
       grant.active = false;
+      this.#onChange?.();
     }
     return true;
+  }
+
+  /**
+   * 非消耗式检查 job 是否持有某权限授予。
+   * 用于编排层确认“证据存在”；真实执行前仍应调用 isGranted。
+   *
+   * @param jobId job id
+   * @param permissionId 权限
+   * @returns 是否存在有效授予
+   */
+  hasGrant(jobId: string, permissionId: PermissionId): boolean {
+    if (isAllowedByDefault(permissionId)) {
+      return true;
+    }
+    return this.#grants.some(
+      (g) => g.active && g.jobId === jobId && g.permissionId === permissionId,
+    );
   }
 
   /**
@@ -204,6 +235,113 @@ export class PermissionGate {
       payload.jobId = jobId;
     }
     return payload;
+  }
+
+  /**
+   * 导出可落盘快照。
+   *
+   * @returns dump
+   */
+  dump(): {
+    requests: GatePermissionRequest[];
+    queueStatus: Array<[string, PermissionQueueStatus]>;
+    grants: PermissionGrantRecord[];
+    grantSeq: number;
+  } {
+    return {
+      requests: [...this.#requests.values()].map((item) => ({
+        ...item,
+        requestedPermissions: [...item.requestedPermissions],
+        proposedScope: { ...item.proposedScope },
+      })),
+      queueStatus: [...this.#queueStatus.entries()],
+      grants: this.#grants.map((item) => ({ ...item })),
+      grantSeq: this.#grantSeq,
+    };
+  }
+
+  /**
+   * 从快照恢复。
+   *
+   * @param dump 快照
+   */
+  hydrate(dump: {
+    requests?: GatePermissionRequest[];
+    queueStatus?: Array<[string, PermissionQueueStatus]>;
+    grants?: PermissionGrantRecord[];
+    grantSeq?: number;
+  }): void {
+    this.#requests.clear();
+    for (const request of dump.requests ?? []) {
+      this.#requests.set(request.permissionRequestId, request);
+    }
+    this.#queueStatus = new Map(dump.queueStatus ?? []);
+    this.#grants = (dump.grants ?? []).map((item) => ({ ...item }));
+    this.#grantSeq = dump.grantSeq ?? 0;
+  }
+
+  /**
+   * 撤销全部授予与待确认（配对 revoke 时调用）。
+   */
+  revokeAll(): void {
+    this.#requests.clear();
+    this.#queueStatus.clear();
+    this.#grants = [];
+    this.#onChange?.();
+  }
+
+  /**
+   * job 是否仍有 pending 权限请求（并发 job.create 门闩）。
+   *
+   * @param jobId job id
+   * @returns 是否存在 pending
+   */
+  hasPendingForJob(jobId: string): boolean {
+    for (const [id, request] of this.#requests) {
+      if (request.jobId === jobId && this.#queueStatus.get(id) === "pending") {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 列出已裁决且仍持有有效 grant 的请求 id（启动 reconcile 用）。
+   *
+   * @returns permissionRequestId 列表
+   */
+  listDecidedGrantableRequestIds(): string[] {
+    const ids: string[] = [];
+    for (const [permissionRequestId, status] of this.#queueStatus) {
+      if (status !== "decided") {
+        continue;
+      }
+      const request = this.#requests.get(permissionRequestId);
+      if (!request?.jobId) {
+        continue;
+      }
+      const allGranted = request.requestedPermissions.every((permissionId) =>
+        this.hasGrant(request.jobId!, permissionId as PermissionId),
+      );
+      if (allGranted) {
+        ids.push(permissionRequestId);
+      }
+    }
+    return ids;
+  }
+
+  /**
+   * 取消 job 时清除该 job 的 pending 权限请求（若存在）。
+   *
+   * @param jobId job id
+   */
+  clearPendingForJob(jobId: string): void {
+    for (const [id, request] of this.#requests) {
+      if (request.jobId === jobId && this.#queueStatus.get(id) === "pending") {
+        this.#queueStatus.set(id, "decided");
+      }
+    }
+    this.#onChange?.();
   }
 
   /**

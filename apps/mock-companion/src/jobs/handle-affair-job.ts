@@ -1,7 +1,7 @@
 /**
  * Affair / job 入站处理。
  *
- * 职责：校验会话后接受 affair.create / job.create，并启动 mock worker。
+ * 职责：校验会话后接受 affair.create / job.create，出站 needs_permission 并等待 mock 桌面授权。
  * 不拥有：用户验收关闭事务、真实 OpenClaw 执行。
  * 副作用：更新 store；emit 协议事件；异步调度 mock worker。
  */
@@ -18,7 +18,6 @@ import {
 import type { MockCompanionConfig } from "../config.js";
 import type { EmitEnvelope } from "../pairing/handle-pairing.js";
 import type { MemoryStore } from "../store/memory-store.js";
-import { startMockWorker } from "./mock-worker.js";
 
 /**
  * 处理结果。
@@ -36,6 +35,75 @@ function requireSession(store: MemoryStore): ProtocolError | null {
     return createProtocolError("session_required", "需要先完成 pairing 与 session.open", false);
   }
   return null;
+}
+
+const KNOWN_PERMISSIONS = [
+  "workspace.read",
+  "workspace.write",
+  "command.run",
+  "network.access",
+  "git.read",
+  "git.write",
+  "secrets.read",
+  "desktop.control",
+] as const;
+
+/**
+ * 过滤已知权限 id。
+ *
+ * @param items 原始列表
+ * @returns 已知权限
+ */
+function filterKnownPermissions(items: readonly string[]): string[] {
+  return items.filter((item) => (KNOWN_PERMISSIONS as readonly string[]).includes(item));
+}
+
+/**
+ * 出站 permission.request、job.needs_permission。
+ *
+ * @param store store
+ * @param config 配置
+ * @param inbound 入站
+ * @param needsPermission 状态为 needs_permission 的 job 载荷
+ * @param allowed 权限
+ * @param emit 出站
+ */
+function emitJobCreateOutbound(
+  store: MemoryStore,
+  config: MockCompanionConfig,
+  inbound: ProtocolEnvelope,
+  needsPermission: JobPayload,
+  allowed: string[],
+  emit: EmitEnvelope,
+): void {
+  const phoneDeviceId = store.session!.phoneDeviceId;
+  const party = {
+    source: { kind: "companion" as const, deviceId: config.desktopDeviceId },
+    target: { kind: "phone" as const, deviceId: phoneDeviceId },
+    correlationId: inbound.messageId,
+  };
+  emit(
+    createEnvelope({
+      ...party,
+      type: "job.needs_permission",
+      payload: needsPermission,
+    }),
+  );
+  emit(
+    createEnvelope({
+      ...party,
+      type: "permission.request",
+      payload: {
+        permissionRequestId: needsPermission.permissionRequestId ?? needsPermission.jobId,
+        jobId: needsPermission.jobId,
+        affairId: needsPermission.affairId,
+        requestedPermissions: allowed,
+        reason: needsPermission.goal,
+        risk: "low",
+        proposedScope: needsPermission.workspaceHint ? { workspaceRoot: needsPermission.workspaceHint } : {},
+      },
+    }),
+  );
 }
 
 /**
@@ -80,7 +148,7 @@ export function handleAffairCreate(
 }
 
 /**
- * 处理 job.create：接受后启动 mock worker。
+ * 处理 job.create：写入 needs_permission 并出站 permission.request。
  *
  * @param store 内存 store
  * @param config 配置
@@ -99,6 +167,17 @@ export function handleJobCreate(
     return { ok: false, error: sessionErr };
   }
   const payload = inbound.payload as unknown as JobPayload;
+  const allowed = filterKnownPermissions(payload.allowedPermissions ?? []);
+  if (allowed.length === 0) {
+    return {
+      ok: false,
+      error: createProtocolError(
+        "job_permissions_required",
+        "job.create 必须声明至少一个已知 allowedPermissions",
+        false,
+      ),
+    };
+  }
   const affair = store.affairs.get(payload.affairId);
   if (!affair) {
     return {
@@ -117,39 +196,39 @@ export function handleJobCreate(
     };
   }
 
-  const queued: JobPayload = {
+  const needsPermission: JobPayload = {
     ...payload,
-    status: "queued",
+    status: "needs_permission",
     executor: "openclaw",
+    permissionRequestId: payload.permissionRequestId ?? payload.jobId,
+    progressSummary: "",
   };
-  store.jobs.set(queued.jobId, queued);
+  store.jobs.set(needsPermission.jobId, needsPermission);
+  store.permissionItems.push({
+    permissionRequestId: needsPermission.permissionRequestId ?? needsPermission.jobId,
+    queueStatus: "pending",
+    requester: "zhang-boss",
+    affairId: needsPermission.affairId,
+    jobId: needsPermission.jobId,
+    requestedPermissions: allowed,
+    reason: needsPermission.goal,
+    risk: "low",
+    proposedScope: {
+      workspaceRoot: needsPermission.workspaceHint ?? null,
+      commands: [],
+      networkHosts: [],
+    },
+    availableDecisions: ["allow_once", "allow_for_job", "allow_for_affair", "deny", "require_more_context"],
+    denyConsequence: "job 停在 needs_permission",
+    requestedAt: new Date().toISOString(),
+    expiresAt: null,
+  });
 
-  let nextAffair = { ...affair, currentJobId: queued.jobId };
+  let nextAffair = { ...affair, currentJobId: needsPermission.jobId };
   if (canTransitionAffairStatus(nextAffair.status, "delegated")) {
     nextAffair = { ...nextAffair, status: "delegated" };
   }
   store.affairs.set(nextAffair.affairId, nextAffair);
-
-  const phoneDeviceId = store.session!.phoneDeviceId;
-  emit(
-    createEnvelope({
-      source: { kind: "companion", deviceId: config.desktopDeviceId },
-      target: { kind: "phone", deviceId: phoneDeviceId },
-      type: "job.accepted",
-      correlationId: inbound.messageId,
-      payload: queued,
-    }),
-  );
-  emit(
-    createEnvelope({
-      source: { kind: "companion", deviceId: config.desktopDeviceId },
-      target: { kind: "phone", deviceId: phoneDeviceId },
-      type: "affair.update",
-      correlationId: inbound.messageId,
-      payload: nextAffair,
-    }),
-  );
-
-  startMockWorker(store, config, queued.jobId, phoneDeviceId, inbound.messageId, emit);
+  emitJobCreateOutbound(store, config, inbound, needsPermission, allowed, emit);
   return { ok: true };
 }

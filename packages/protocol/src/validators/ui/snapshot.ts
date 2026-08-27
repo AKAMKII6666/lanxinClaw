@@ -27,6 +27,7 @@ const SNAPSHOT_KEYS = [
   "device",
   "zhangBoss",
   "currentAffair",
+  "sideChannel",
 ] as const;
 
 /**
@@ -189,6 +190,32 @@ export function validateControlPanelSnapshot(
   const affair = validateCurrentAffair(obj.value.currentAffair);
   if (!affair.ok) {
     return affair;
+  }
+  if (obj.value.sideChannel !== undefined) {
+    const channel = expectObject(obj.value.sideChannel, "sideChannel");
+    if (!channel.ok) {
+      return channel;
+    }
+    if (typeof channel.value.pendingContextCount !== "number") {
+      return {
+        ok: false,
+        error: {
+          code: "validation_failed",
+          message: "sideChannel.pendingContextCount 必须是数字",
+          retryable: false,
+        },
+      };
+    }
+    if (!Array.isArray(channel.value.messages) || !Array.isArray(channel.value.attachments)) {
+      return {
+        ok: false,
+        error: {
+          code: "validation_failed",
+          message: "sideChannel.messages / attachments 必须是数组",
+          retryable: false,
+        },
+      };
+    }
   }
   return { ok: true, value: obj.value };
 }

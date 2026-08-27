@@ -7,77 +7,63 @@
  * 副作用：启动 Electron；加载本地 HTML 或开发期 Vite URL；注册白名单 IPC。
  */
 
-import type { BrowserWindowConstructor } from "./create-window.js";
 import { createMainWindow, resolveDefaultUiPaths } from "./create-window.js";
-import type { TrayConstructor, TrayMenuBuilder } from "./create-tray.js";
 import { createAppTray } from "./create-tray.js";
-import { readOpenAtLogin, setOpenAtLogin, type LoginItemSettingsPort } from "../session/autostart.js";
+import { createTrayIcon, resolveTrayIconPath } from "./tray-icon.js";
 import { trayConnectionToolTip } from "../session/reconnect-policy.js";
-import { createCompanionBackendRuntime } from "../../backend/runtime.js";
+import { OpenClawAdapter, createFileAdapterJobStore, createLocalSafeRuntimeClient } from "@lanxin-claw/openclaw-adapter";
+import path from "node:path";
+import { resolveOpenClawNodeBin } from "./node-bin.js";
+import { resolveBundledOpenClawEntry } from "./openclaw-entry.js";
+import { confirmQuit } from "./quit-confirm.js";
+import type { ElectronRuntime, StartCompanionShellOptions } from "./electron-runtime.js";
+import { createSecretsFromSafeStorage } from "./safe-storage-secrets.js";
+import { buildResidentTrayExtraItems, showDesktopNotification } from "./resident-tray-menu.js";
 import {
-  MemoryIdentityPersistence,
-  createDeviceIdentityStore,
-} from "../../credentials/identity-store.js";
+  buildGatewayDiagnosticsInput,
+  buildGatewaySnapshotExtras,
+} from "./panel-runtime-extras.js";
+import { createCompanionBackendRuntime } from "../../backend/runtime.js";
+import { createFileAuditStore } from "../../audit/file-store.js";
+import { FileIdentityPersistence } from "../../credentials/persistence/file-identity-persistence.js";
+import { EncryptedIdentityPersistence } from "../../credentials/persistence/encrypted-identity-persistence.js";
+import { MemoryIdentityPersistence, createDeviceIdentityStore } from "../../credentials/identity-store.js";
+import { GatewayRuntimeService } from "../../gateway-runtime/service.js";
+import { JobDelegator } from "../../jobs/delegation/delegator.js";
+import { createLoggerRegistry, resolveLogDir, type LoggerRegistry } from "../../logging/logger.js";
+import { createGatewayRuntimeReadyProbe } from "../../onboarding/probe/runtime-probe.js";
+import { createFileOnboardingStore, createMemoryOnboardingStore } from "../../onboarding/store/store.js";
+import { OnboardingService } from "../../onboarding/service.js";
+import { createFileBackendMirrorStore } from "../../state/mirror/backend-mirror.js";
+import { createFilePermissionGateStore } from "../../permissions/gate/file-store.js";
+import { PermissionGate } from "../../permissions/gate/permission-gate.js";
+import { flushPendingContext } from "../../protocol-server/bridge-actions.js";
+import { runShellBridgeAction } from "./bridge-outbound.js";
+import {
+  createDeviceRevokePairingHandler,
+  createShellJobDelegator,
+  restoreShellInFlightJobs,
+  startShellLanDiscovery,
+} from "./runtime-wiring.js";
+import { parseProtocolListenHost, type ProtocolListenHost } from "../session/listen-host.js";
+import { JsonFilePersistence } from "../../persistence/json-file.js";
+import type { LoginItemSettingsPort } from "../session/autostart.js";
 import { startCompanionProtocolServer } from "../../protocol-server/server.js";
-import { registerBridgeIpc, type WebContentsLike } from "../../bridge/register-ipc.js";
+import { registerBridgeIpc, type OnboardingIpcPort, type WebContentsLike } from "../../bridge/register-ipc.js";
 
-/**
- * Electron 运行时最小面，便于测试替换。
- */
-export interface ElectronRuntime {
-  /** app 模块 */
-  app: {
-    whenReady(): Promise<void>;
-    quit(): void;
-    on(event: "window-all-closed", listener: () => void): void;
-  };
-  /** BrowserWindow 构造器 */
-  BrowserWindow: BrowserWindowConstructor;
-  /** Tray 构造器 */
-  Tray: TrayConstructor;
-  /** Menu 构建器 */
-  Menu: TrayMenuBuilder;
-  /** nativeImage 工厂 */
-  nativeImage: {
-    createEmpty(): unknown;
-  };
-  /** 可选 ipcMain；缺省则跳过 bridge 注册（纯壳单测） */
-  ipcMain?: {
-    handle(
-      channel: string,
-      listener: (event: unknown, ...args: unknown[]) => unknown,
-    ): void;
-  };
-  /** 可选开机启动适配；缺省用内存假实现 */
-  loginItem?: LoginItemSettingsPort;
-}
-
-/**
- * 启动壳时的路径覆盖。
- */
-export interface StartCompanionShellOptions {
-  /** 用于默认路径；显式路径优先 */
-  metaUrl?: string;
-  /** preload 绝对路径 */
-  preloadPath?: string;
-  /** 打包 renderer HTML */
-  rendererHtmlPath?: string;
-  /** 开发期 Vite URL，如 http://127.0.0.1:5173/ */
-  rendererUrl?: string;
-  /** 是否启动桌面 phone protocol server；入口默认启用，单测可关闭 */
-  protocolServer?: {
-    enabled: boolean;
-    port?: number;
-  };
-}
+export type { ElectronRuntime, StartCompanionShellOptions } from "./electron-runtime.js";
 
 /**
  * 可选 show / webContents，避免把 Electron 具体类型绑进窗口契约。
  */
 interface WindowWithBridgeHooks {
   show?: () => void;
+  hide?: () => void;
+  on?: (event: "close", listener: (event?: { preventDefault(): void }) => void) => void;
   webContents?: WebContentsLike;
 }
+
+let retainedTray: unknown = null;
 
 /**
  * 在已注入的 Electron runtime 上启动桌面壳。
@@ -91,6 +77,13 @@ export async function startCompanionDesktopShell(
   options: StartCompanionShellOptions = {},
 ): Promise<void> {
   await electron.app.whenReady();
+  const userDataDir = electron.app.getPath?.("userData") ?? null;
+  const logDir = options.logDir ?? resolveLogDir(process.env, userDataDir);
+  const logRegistry: LoggerRegistry = await createLoggerRegistry({
+    dir: logDir,
+  });
+  const shellLogger = logRegistry.getLogger("shell");
+  shellLogger.info("companion shell 启动");
   const defaults = options.metaUrl
     ? resolveDefaultUiPaths(options.metaUrl)
     : { preloadPath: "", rendererHtmlPath: "" };
@@ -103,13 +96,237 @@ export async function startCompanionDesktopShell(
     throw new Error("startCompanionDesktopShell 缺少 rendererUrl 或 rendererHtmlPath");
   }
 
+  const desktopDeviceId = process.env.LANXIN_DESKTOP_DEVICE_ID?.trim() || "lanxin-desktop";
+  const localWorkspaceRoot = process.env.LANXIN_OPENCLAW_WORKSPACE_ROOT?.trim() || null;
+  const adapterJobStore = userDataDir ? createFileAdapterJobStore(path.join(userDataDir, "adapter-jobs.json")) : undefined;
+  const entryInput = {
+    appPath: electron.app.getAppPath?.() ?? null,
+    resourcesPath: (process as { resourcesPath?: string }).resourcesPath ?? null,
+    cwd: process.cwd(),
+    ...(options.openclawEntry !== undefined ? { explicit: options.openclawEntry } : {}),
+    ...(process.env.LANXIN_OPENCLAW_ENTRY !== undefined ? { envEntry: process.env.LANXIN_OPENCLAW_ENTRY } : {}),
+  };
+  const openclawEntry = resolveBundledOpenClawEntry(entryInput);
+  const openclawNodeBin = resolveOpenClawNodeBin({
+    resourcesPath: (process as { resourcesPath?: string }).resourcesPath ?? null,
+    execPath: process.execPath,
+    ...(process.env.LANXIN_OPENCLAW_NODE_BIN !== undefined
+      ? { envNodeBin: process.env.LANXIN_OPENCLAW_NODE_BIN }
+      : {}),
+  });
+  const gatewayStateDir =
+    options.openclawStateDir ??
+    (userDataDir ? path.join(userDataDir, "openclaw-runtime") : "");
+  const workspace =
+    options.workspace ??
+    localWorkspaceRoot ??
+    (gatewayStateDir ? path.join(gatewayStateDir, "workspace") : process.cwd());
+  const adapter =
+    options.adapter ??
+    new OpenClawAdapter({
+      runtime: createLocalSafeRuntimeClient({ workspaceRoot: workspace }),
+      ...(adapterJobStore ? { store: adapterJobStore } : {}),
+    });
   let approvePairing: ((pairingId: string) => Promise<void>) | null = null;
-  const backend = createCompanionBackendRuntime({
-    onBridgeAction: async (action) => {
-      if (action.type === "pairing.approve") {
-        await approvePairing?.(action.pairingId);
+  let protocolHandle: Awaited<ReturnType<typeof startCompanionProtocolServer>> | null = null;
+  let delegator: JobDelegator | null = null;
+  let allowWindowClose = false;
+  const diagnosticsState = {
+    protocolServerReady: false,
+    lanDiscoveryReady: false,
+    recentServerErrorCode: null as string | null,
+  };
+  const secrets = createSecretsFromSafeStorage(electron.safeStorage);
+  const onboardingStore =
+    userDataDir && secrets.isAvailable()
+      ? createFileOnboardingStore(path.join(userDataDir, "settings.json"), secrets)
+      : createMemoryOnboardingStore(secrets);
+  const gatewayService =
+    options.gatewayService ??
+    (openclawEntry && gatewayStateDir
+      ? new GatewayRuntimeService({
+          openclawEntry,
+          nodeBin: openclawNodeBin,
+          stateDir: gatewayStateDir,
+          logFile: path.join(gatewayStateDir, "logs", "openclaw-runtime.log"),
+          logger: logRegistry.getLogger("runtime"),
+          ...(adapterJobStore ? { adapterJobStore } : {}),
+        })
+      : null);
+  const onboardingService = new OnboardingService({
+    store: onboardingStore,
+    logger: logRegistry.getLogger("shell"),
+    runtimeReadyProbe: async () => {
+      const stored = onboardingStore.load();
+      if (!stored) {
+        return { ok: false, code: "onboarding_config_missing", message: "缺少模型配置" };
       }
+      if (!gatewayService) {
+        return { ok: false, code: "gateway_runtime_unavailable", message: "未配置 OpenClaw 运行时" };
+      }
+      const handle = await gatewayService.ensureStarted({
+        provider: stored.provider,
+        apiKey: stored.apiKey,
+        endpoint: stored.endpoint,
+        modelRef: stored.modelRef,
+        workspace,
+      });
+      delegator?.setAdapter(handle.adapter);
+      return createGatewayRuntimeReadyProbe({
+        gatewayUrl: handle.url,
+        token: handle.token,
+      })();
     },
+  });
+  const onboardingIpc: OnboardingIpcPort = {
+    getStatus: () => ({
+      status: onboardingService.getStatus(),
+      lastError: onboardingService.getLastError(),
+    }),
+    submit: async (config, options) => {
+      const probe = await onboardingService.submitConfig(
+        {
+          provider: config.provider,
+          apiKey: config.apiKey,
+          endpoint: config.endpoint ?? null,
+          modelRef: config.modelRef,
+        },
+        options,
+      );
+      return {
+        ok: probe.ok,
+        ...(probe.ok
+          ? {}
+          : { error: { code: probe.code, message: probe.message, retryable: false } }),
+        status: {
+          status: onboardingService.getStatus(),
+          lastError: onboardingService.getLastError(),
+        },
+      };
+    },
+    bootstrapRuntime: async (options) => {
+      const probe = await onboardingService.bootstrapRuntime(options);
+      return {
+        ok: probe.ok,
+        ...(probe.ok
+          ? {}
+          : { error: { code: probe.code, message: probe.message, retryable: true } }),
+        status: {
+          status: onboardingService.getStatus(),
+          lastError: onboardingService.getLastError(),
+        },
+      };
+    },
+    clear: () => {
+      onboardingService.clear();
+      void gatewayService?.stop();
+      return {
+        status: onboardingService.getStatus(),
+        lastError: onboardingService.getLastError(),
+      };
+    },
+  };
+  const permissionGate = new PermissionGate();
+  if (userDataDir) {
+    const permissionStore = createFilePermissionGateStore(path.join(userDataDir, "permission-grants.json"));
+    permissionGate.hydrate(permissionStore.load());
+    permissionGate.setOnChange(() => {
+      permissionStore.save({ schemaVersion: 1, ...permissionGate.dump() });
+    });
+  }
+  const shellSettings = userDataDir
+    ? new JsonFilePersistence<{ listenHost: ProtocolListenHost }>(path.join(userDataDir, "shell-settings.json"), {
+        listenHost: parseProtocolListenHost(process.env.LANXIN_PROTOCOL_HOST),
+      })
+    : null;
+  let listenHost = parseProtocolListenHost(
+    options.protocolServer?.host ?? shellSettings?.load().listenHost ?? process.env.LANXIN_PROTOCOL_HOST,
+  );
+  const loginPort: LoginItemSettingsPort | null =
+    electron.app.getLoginItemSettings && electron.app.setLoginItemSettings
+      ? {
+          isOpenAtLogin: () => electron.app.getLoginItemSettings?.().openAtLogin ?? false,
+          setOpenAtLogin: (enabled) => electron.app.setLoginItemSettings?.({ openAtLogin: enabled }),
+        }
+      : null;
+  const identityStore = createDeviceIdentityStore(
+    userDataDir && secrets.isAvailable()
+      ? new EncryptedIdentityPersistence(
+          new FileIdentityPersistence(path.join(userDataDir, "identity.json")),
+          secrets,
+        )
+      : new MemoryIdentityPersistence(),
+  );
+  const backend = createCompanionBackendRuntime({
+    permissionGate,
+    desktopDeviceId,
+    supervisionIntervalMs: 2_000,
+    ...(userDataDir
+      ? {
+          auditStore: createFileAuditStore(path.join(userDataDir, "audit.json")),
+          mirrorStore: createFileBackendMirrorStore(path.join(userDataDir, "backend-mirror.json")),
+        }
+      : {}),
+    snapshotExtras: () =>
+      buildGatewaySnapshotExtras(
+        gatewayService,
+        onboardingService.getStatus() === "ready",
+        secrets.isAvailable(),
+      ),
+    diagnosticsInput: () =>
+      buildGatewayDiagnosticsInput({
+        protocolServerReady: diagnosticsState.protocolServerReady,
+        lanDiscoveryReady: diagnosticsState.lanDiscoveryReady,
+        recentServerErrorCode: diagnosticsState.recentServerErrorCode,
+        gateway: gatewayService,
+        secretsAvailable: secrets.isAvailable(),
+      }),
+    onDesktopNotify: (title, body) => {
+      shellLogger.info({ title, body }, "桌面提醒");
+      showDesktopNotification(electron.Notification, title, body);
+    },
+    onProtocolBroadcast: (envelope) => {
+      protocolHandle?.broadcast(envelope);
+    },
+    onDeviceRevokePairing: createDeviceRevokePairingHandler({
+      identityStore,
+      getProtocolHandle: () => protocolHandle,
+      getPairingId: () => backend.getState().connection.pairingId ?? null,
+      getDelegator: () => delegator,
+      getJobAffairId: (jobId) => backend.getState().jobs.get(jobId)?.affairId ?? "",
+    }),
+    onBridgeAction: (action, result) =>
+      runShellBridgeAction(
+        {
+          desktopDeviceId,
+          backend,
+          getDelegator: () => delegator,
+          broadcast: (envelope) => protocolHandle?.broadcast(envelope),
+          approvePairing,
+          openLogDir: () => {
+            void electron.shell?.openPath(logDir);
+          },
+          relaunchCompanion: () => {
+            electron.app.relaunch?.();
+            electron.app.quit();
+          },
+          logger: shellLogger,
+        },
+        action,
+        result,
+      ),
+  });
+  delegator = createShellJobDelegator({
+    adapter,
+    backend,
+    desktopDeviceId,
+    workspace,
+    applyProtocolEnvelope: (envelope) => backend.applyProtocolEnvelope(envelope),
+    sendEnvelope: (envelope) => {
+      protocolHandle?.sendEnvelope(envelope);
+    },
+    pollIntervalMs: options.jobPollIntervalMs ?? Number(process.env.LANXIN_JOB_POLL_MS ?? 2_000),
+    logRegistry,
   });
   let mainWindow: WindowWithBridgeHooks | null = null;
 
@@ -125,23 +342,59 @@ export async function startCompanionDesktopShell(
         getDiagnosticReport: backend.getDiagnosticReport,
       },
       () => mainWindow?.webContents ?? null,
+      (entry) => {
+        const logger = logRegistry.getLogger("ui");
+        logger[entry.level]({ ...(entry.meta !== undefined ? { meta: entry.meta } : {}) }, entry.message);
+      },
+      onboardingIpc,
     );
   }
 
   if (options.protocolServer?.enabled) {
     const protocolOptions = {
       ...(options.protocolServer.port !== undefined ? { port: options.protocolServer.port } : {}),
+      host: options.protocolServer.host ?? listenHost,
       backend,
-      identityStore: createDeviceIdentityStore(new MemoryIdentityPersistence()),
+      identityStore,
       pairing: {
-        desktopDeviceId: "lanxin-desktop",
+        desktopDeviceId,
         desktopDisplayName: "Lanxin Companion",
       },
     };
-    const protocol = await startCompanionProtocolServer({
+    protocolHandle = await startCompanionProtocolServer({
       ...protocolOptions,
+      onJobCancel: (input) => (delegator ? delegator.cancelJob(input) : Promise.resolve()),
+      onSessionAccepted: () => {
+        flushPendingContext({
+          getParty: () => {
+            const phoneDeviceId = backend.getState().connection.phoneDeviceId;
+            return phoneDeviceId ? { desktopDeviceId, phoneDeviceId } : null;
+          },
+          isSessionAuthenticated: () => backend.getState().connection.sessionAuthenticated,
+          hasActiveCall: () => false,
+          getAffair: (affairId) => backend.getState().affairs.get(affairId),
+          broadcast: (envelope) => protocolHandle?.broadcast(envelope),
+          pendingContext: backend.getPendingContext(),
+        });
+      },
     });
-    approvePairing = protocol.approvePairing;
+    diagnosticsState.protocolServerReady = true;
+    approvePairing = protocolHandle.approvePairing;
+
+    restoreShellInFlightJobs(delegator, backend, adapter);
+
+    await startShellLanDiscovery({
+      enabled: options.discovery?.enabled !== false,
+      protocolPort: protocolHandle.port,
+      desktopDeviceId,
+      logger: shellLogger,
+      onResult: (result) => {
+        diagnosticsState.lanDiscoveryReady = result.lanDiscoveryReady;
+        if (result.recentServerErrorCode) {
+          diagnosticsState.recentServerErrorCode = result.recentServerErrorCode;
+        }
+      },
+    });
   }
 
   mainWindow = (await createMainWindow({
@@ -151,43 +404,50 @@ export async function startCompanionDesktopShell(
       ? { rendererUrl: options.rendererUrl }
       : { rendererHtmlPath }),
   })) as WindowWithBridgeHooks;
+  mainWindow.on?.("close", (event) => {
+    if (allowWindowClose) {
+      return;
+    }
+    event?.preventDefault();
+    mainWindow?.hide?.();
+  });
 
-  const loginItem = electron.loginItem ?? createMemoryLoginItemPort();
-
-  createAppTray({
+  retainedTray = createAppTray({
     Tray: electron.Tray,
     Menu: electron.Menu,
-    icon: electron.nativeImage.createEmpty(),
+    icon: createTrayIcon(electron.nativeImage, resolveTrayIconPath(path.dirname(preloadPath))),
     toolTip: trayConnectionToolTip(false, false),
-    disconnectHint: "与澜星电话的连接已断开。",
-    openAtLogin: readOpenAtLogin(loginItem),
-    onToggleOpenAtLogin: (next) => {
-      setOpenAtLogin(loginItem, next);
-    },
+    extraItems: buildResidentTrayExtraItems({
+      loginPort,
+      listenHost,
+      onListenHostChange: (next) => {
+        listenHost = next;
+        shellSettings?.save({ listenHost: next });
+      },
+      openLogDir: () => {
+        void electron.shell?.openPath(logDir);
+      },
+      logger: shellLogger,
+    }),
     onShowWindow: () => {
       mainWindow?.show?.();
     },
     onQuit: () => {
-      electron.app.quit();
+      void (async () => {
+        if (!(await confirmQuit(electron.dialog))) {
+          return;
+        }
+        allowWindowClose = true;
+        backend.stopSupervision();
+        delegator?.stop();
+        await protocolHandle?.close();
+        await gatewayService?.stop();
+        electron.app.quit();
+      })();
     },
   });
 
   electron.app.on("window-all-closed", () => {
-    electron.app.quit();
+    return;
   });
-}
-
-/**
- * 内存开机启动（无 Electron login item 时）。
- *
- * @returns port
- */
-function createMemoryLoginItemPort(): LoginItemSettingsPort {
-  let openAtLogin = false;
-  return {
-    isOpenAtLogin: () => openAtLogin,
-    setOpenAtLogin: (value) => {
-      openAtLogin = value;
-    },
-  };
 }

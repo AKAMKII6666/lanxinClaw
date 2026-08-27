@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/job-cancel.schema.json",
+  "title": "Lanxing Claw Job Cancel",
+  "description": "job.cancel 载荷：至少 jobId 与 affairId（协议消息目录口径）",
+  "type": "object",
+  "required": ["jobId", "affairId"],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "affairId": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

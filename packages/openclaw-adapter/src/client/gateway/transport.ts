@@ -14,6 +14,8 @@ import type { OpenClawRunSnapshot } from "../runtime-client.js";
 export interface GatewayCreateRunRequest {
   /** Gateway agent id */
   agentId: string;
+  /** 幂等键（agent 方法 idempotencyKey）；缺省按 sessionKey 派生 */
+  idempotencyKey?: string | null;
   /** 交给 agent 的输入 */
   input: string;
   /** 会话键；绑定 Lanxing job */
@@ -93,4 +95,3 @@ export function createUnavailableGatewayTransport(reason: string): GatewayTransp
     cancelRun: fail,
   };
 }
-

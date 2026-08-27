@@ -26,6 +26,8 @@ import {
   createDeviceIdentityStore,
 } from "../../apps/companion/src/credentials/identity-store.js";
 import { startCompanionProtocolServer } from "../../apps/companion/src/protocol-server/server.js";
+import { JobDelegator } from "../../apps/companion/src/jobs/delegation/delegator.js";
+import { buildPermissionDecisionEnvelope } from "../../apps/companion/src/protocol-server/outbound-envelopes.js";
 
 const PHONE_DEVICE_ID = "phone_sim_real_companion_001";
 const DESKTOP_DEVICE_ID = "desktop_real_companion_001";
@@ -34,19 +36,61 @@ const DESKTOP_DEVICE_ID = "desktop_real_companion_001";
  * 主流程。
  */
 async function main(): Promise<void> {
-  const backend = createCompanionBackendRuntime();
-  const identityStore = createDeviceIdentityStore(new MemoryIdentityPersistence());
   const runtime = createMutableMockOpenClawRuntimeClient();
   const adapter = new OpenClawAdapter({ runtime: runtime.client });
-  const server = await startCompanionProtocolServer({
+  let protocolServer: Awaited<ReturnType<typeof startCompanionProtocolServer>>;
+  const backend = createCompanionBackendRuntime({
+    onBridgeAction: async (action, result) => {
+      if (action.type === "permission.decide" && result.ok) {
+        const phoneDeviceId = backend.getState().connection.phoneDeviceId;
+        const request = backend.getPermissionGate().getRequest(action.permissionRequestId);
+        if (phoneDeviceId) {
+          protocolServer.broadcast(
+            buildPermissionDecisionEnvelope(
+              { desktopDeviceId: DESKTOP_DEVICE_ID, phoneDeviceId },
+              {
+                permissionRequestId: action.permissionRequestId,
+                jobId: request?.jobId,
+                decision: action.decision,
+                decidedAt: new Date().toISOString(),
+              },
+            ),
+          );
+        }
+        if (action.decision === "allow_once" || action.decision === "allow_for_job") {
+          await delegator.handlePermissionGranted(action.permissionRequestId);
+        } else {
+          delegator.rejectPermission(
+            action.permissionRequestId,
+            action.decision === "deny" ? "permission_denied" : "require_more_context",
+          );
+        }
+      }
+    },
+  });
+  const delegator = new JobDelegator({
+    adapter,
+    gate: backend.getPermissionGate(),
+    getJobStatus: (jobId) => backend.getState().jobs.get(jobId)?.status,
+    getWorkspaceHint: (jobId) => backend.getState().jobs.get(jobId)?.workspaceHint ?? null,
+    getAffair: (affairId) => backend.getState().affairs.get(affairId),
+    getPhoneDeviceId: () => backend.getState().connection.phoneDeviceId,
+    desktopDeviceId: DESKTOP_DEVICE_ID,
+    applyProtocolEnvelope: (envelope) => backend.applyProtocolEnvelope(envelope),
+    sendEnvelope: (envelope) => protocolServer?.sendEnvelope(envelope),
+    pollIntervalMs: 50,
+  });
+  const identityStore = createDeviceIdentityStore(new MemoryIdentityPersistence());
+  protocolServer = await startCompanionProtocolServer({
     backend,
     identityStore,
     pairing: {
       desktopDeviceId: DESKTOP_DEVICE_ID,
       desktopDisplayName: "Lanxin Companion",
     },
+    onJobCancel: (input) => delegator.cancelJob(input),
   });
-  const phone = new PhoneClient(server.wsUrl);
+  const phone = new PhoneClient(protocolServer.wsUrl);
 
   try {
     await phone.open();
@@ -76,7 +120,7 @@ async function main(): Promise<void> {
       },
     }));
     await phone.nextJson("pairing.confirmed ack");
-    await server.approvePairing(pairingId);
+    await protocolServer.approvePairing(pairingId);
     await phone.nextEnvelope("pairing.desktop_approved");
     await phone.nextEnvelope("pairing.completed");
 
@@ -99,22 +143,95 @@ async function main(): Promise<void> {
     }));
     await phone.nextEnvelope("session.accepted");
 
+    phone.send(createEnvelope({
+      source: { kind: "phone", deviceId: PHONE_DEVICE_ID },
+      target: { kind: "companion", deviceId: DESKTOP_DEVICE_ID },
+      type: "affair.create",
+      payload: {
+        affairId: "affair_empty_perm_e2e",
+        title: "空权限",
+        ownerAgent: "zhang-boss",
+        status: "ready",
+        context: [],
+        acceptanceCriteria: [],
+        currentJobId: null,
+      },
+    }));
+    await phone.nextJson("affair.create ack");
+    phone.send(createEnvelope({
+      source: { kind: "phone", deviceId: PHONE_DEVICE_ID },
+      target: { kind: "companion", deviceId: DESKTOP_DEVICE_ID },
+      type: "job.create",
+      payload: {
+        jobId: "job_empty_perm_e2e",
+        affairId: "affair_empty_perm_e2e",
+        executor: "openclaw",
+        status: "queued",
+        goal: "empty permissions must fail",
+        workspaceHint: null,
+        allowedPermissions: [],
+      },
+    }));
+    const rejected = await phone.nextJson("empty permissions");
+    if (rejected?.ok !== false || rejected?.error?.code !== "job_permissions_required") {
+      throw new Error(`空权限应拒绝，实际 ${JSON.stringify(rejected)}`);
+    }
+
     const affairId = createAffairId();
-    const jobId = createJobId();
+    const denyJobId = createJobId();
     phone.send(createEnvelope({
       source: { kind: "phone", deviceId: PHONE_DEVICE_ID },
       target: { kind: "companion", deviceId: DESKTOP_DEVICE_ID },
       type: "affair.create",
       payload: {
         affairId,
-        title: "真实 companion 协议闭环",
+        title: "deny 分支验收",
         ownerAgent: "zhang-boss",
         status: "running",
-        context: ["scripts/sim-phone/run-real-companion-loop.ts"],
-        acceptanceCriteria: ["job 先进入 needs_permission", "授权后 adapter mock 被调用"],
-        currentJobId: jobId,
+        context: [],
+        acceptanceCriteria: ["deny 闭环"],
+        currentJobId: denyJobId,
       },
     }));
+    phone.send(createEnvelope({
+      source: { kind: "phone", deviceId: PHONE_DEVICE_ID },
+      target: { kind: "companion", deviceId: DESKTOP_DEVICE_ID },
+      type: "job.create",
+      payload: {
+        jobId: denyJobId,
+        affairId,
+        executor: "openclaw",
+        status: "queued",
+        goal: "deny path",
+        workspaceHint: "F:/workspace/demo",
+        allowedPermissions: ["workspace.read"],
+      },
+    }));
+    assertCompanionToPhone(await phone.nextEnvelope("job.needs_permission"));
+    assertCompanionToPhone(await phone.nextEnvelope("permission.request"));
+    const denyAck = await phone.nextJson("job.create deny ack");
+    if (denyAck?.ok !== true || denyAck?.acceptedType !== "job.create") {
+      throw new Error(`job.create ack 缺失: ${JSON.stringify(denyAck)}`);
+    }
+    const denyCard = backend.listPendingPermissionCards()[0];
+    if (!denyCard) {
+      throw new Error("deny 分支未进入 permission gate");
+    }
+    const denyDecided = await backend.applyBridgeAction({
+      type: "permission.decide",
+      permissionRequestId: denyCard.permissionRequestId,
+      decision: "deny",
+    });
+    if (!denyDecided.ok) {
+      throw new Error(`deny decide failed: ${denyDecided.error.message}`);
+    }
+    assertCompanionToPhone(await phone.nextEnvelope("permission.decision"));
+    assertCompanionToPhone(await phone.nextEnvelope("job.failed"));
+    if (backend.getState().jobs.get(denyJobId)?.status !== "failed") {
+      throw new Error("deny 后 job 应 failed");
+    }
+
+    const jobId = createJobId();
     phone.send(createEnvelope({
       source: { kind: "phone", deviceId: PHONE_DEVICE_ID },
       target: { kind: "companion", deviceId: DESKTOP_DEVICE_ID },
@@ -143,48 +260,49 @@ async function main(): Promise<void> {
     }));
 
     await waitFor(() => backend.getState().jobs.get(jobId)?.status === "needs_permission", "job needs_permission");
+    assertCompanionToPhone(await phone.nextEnvelope("job.needs_permission"));
+    assertCompanionToPhone(await phone.nextEnvelope("permission.request"));
+    const createAck = await phone.nextJson("job.create ack");
+    if (createAck?.ok !== true || createAck?.acceptedType !== "job.create") {
+      throw new Error(`job.create ack 缺失: ${JSON.stringify(createAck)}`);
+    }
     const card = backend.listPendingPermissionCards()[0];
     if (!card) {
       throw new Error("job.create 未进入 permission gate");
     }
-    const decision = await backend.applyBridgeAction({
+    const decided = await backend.applyBridgeAction({
       type: "permission.decide",
       permissionRequestId: card.permissionRequestId,
-      decision: "allow_for_job",
+      decision: "allow_once",
     });
-    if (!decision.ok) {
-      throw new Error(`permission decide failed: ${decision.error.message}`);
+    if (!decided.ok) {
+      throw new Error(`permission decide failed: ${decided.error.message}`);
     }
-    if (!backend.getBridgeHost().isPermissionGranted(jobId, "command.run")) {
-      throw new Error("授权后 command.run grant 不可用");
+    await phone.nextEnvelope("permission.decision");
+    if (backend.getBridgeHost().isPermissionGranted(jobId, "command.run")) {
+      throw new Error("allow_once 应在委派 createRun 前被消耗");
     }
+    assertCompanionToPhone(await phone.nextEnvelope("job.accepted"));
 
-    const delegated = await adapter.createJob({
-      jobId,
-      affairId,
-      goal: "simulated phone real companion job",
-      workspaceHint: "F:/workspace/demo",
-      allowedPermissions: ["workspace.read", "command.run"],
-    });
-    if (!delegated.ok) {
-      throw new Error(`adapter mock delegation failed: ${delegated.message}`);
+    const delegated = await adapter.readJob(jobId);
+    if (!delegated.ok || !delegated.job.openclawRunId) {
+      throw new Error("delegator 未创建 adapter job 或缺少 runId");
     }
     runtime.advance({
-      runId: delegated.job.openclawRunId ?? "",
+      runId: delegated.job.openclawRunId,
       status: "completed",
       patch: { summary: "adapter mock completed after permission grant" },
     });
-    const read = await adapter.readJob(jobId);
-    if (!read.ok || read.job.status !== "completed") {
-      throw new Error(`adapter mock 未完成，status=${read.ok ? read.job.status : read.message}`);
-    }
+    await phone.nextEnvelope("job.completed");
+    assertCompanionToPhone(await phone.nextEnvelope("affair.update"));
 
     process.stdout.write(
-      `[sim-phone-real] ok baseUrl=${server.baseUrl} job=${jobId} status=${read.job.status} pending=${backend.listPendingPermissionCards().length}\n`,
+      `[sim-phone-real] ok baseUrl=${protocolServer.baseUrl} job=${jobId} status=completed pending=${backend.listPendingPermissionCards().length}\n`,
     );
   } finally {
     phone.close();
-    await server.close();
+    delegator.stop();
+    await protocolServer.close();
   }
 }
 
@@ -256,7 +374,12 @@ class PhoneClient {
    * 读取下一条 envelope。
    */
   async nextEnvelope(label: string): Promise<ProtocolEnvelope> {
-    return (await this.nextJson(label)) as ProtocolEnvelope;
+    for (;;) {
+      const value = (await this.nextJson(label)) as ProtocolEnvelope;
+      if (!label.includes(".") || value.type === label) {
+        return value;
+      }
+    }
   }
 
   /**
@@ -264,6 +387,19 @@ class PhoneClient {
    */
   close(): void {
     this.#socket.terminate();
+  }
+}
+
+/**
+ * 断言 companion→phone 出站方向。
+ *
+ * @param envelope 协议 envelope
+ */
+function assertCompanionToPhone(envelope: ProtocolEnvelope): void {
+  if (envelope.source.kind !== "companion" || envelope.target.kind !== "phone") {
+    throw new Error(
+      `出站方向错误 type=${envelope.type} source=${envelope.source.kind} target=${envelope.target.kind}`,
+    );
   }
 }
 

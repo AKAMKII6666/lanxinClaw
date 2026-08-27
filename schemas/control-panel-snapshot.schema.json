@@ -48,6 +48,9 @@
         { "type": "null" },
         { "$ref": "#/$defs/currentAffairSummary" }
       ]
+    },
+    "sideChannel": {
+      "$ref": "#/$defs/sideChannel"
     }
   },
   "additionalProperties": false,
@@ -212,6 +215,47 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sideChannel": {
+      "type": "object",
+      "required": ["pendingContextCount", "messages", "attachments"],
+      "properties": {
+        "pendingContextCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["messageId", "authorKind", "text", "sentAt"],
+            "properties": {
+              "messageId": { "type": "string" },
+              "authorKind": { "type": "string" },
+              "text": { "type": "string" },
+              "sentAt": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["attachId", "text", "contentKind", "targetLabel", "deliveryLabel", "attachedAt"],
+            "properties": {
+              "attachId": { "type": "string" },
+              "text": { "type": "string" },
+              "contentKind": { "type": "string" },
+              "targetLabel": { "type": "string" },
+              "deliveryLabel": { "type": "string" },
+              "attachedAt": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false

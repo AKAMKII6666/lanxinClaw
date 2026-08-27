@@ -14,14 +14,12 @@ import { guessContentKind } from "../../../chat/build-outbound.js";
 import { projectZhangBossPanelFromSnapshot } from "../../../chat/snapshot-panel-state.js";
 import type {
   ChatContentKind,
-  ContextAttachHistoryView,
   ZhangBossPanelView,
 } from "../../../chat/views.js";
 import type { RendererBridgeApi } from "../../bridge/renderer-api.js";
 import { ZhangBossAttachHistory } from "./zhang-boss-attach-history.js";
 import { ZhangBossComposer } from "./zhang-boss-composer.js";
 import { createZhangBossComposerBindings } from "./zhang-boss-composer-bindings.js";
-import { buildLocalUserMessage } from "./zhang-boss-local-history.js";
 import { ZhangBossStatusBar } from "./zhang-boss-status-bar.js";
 import { ZhangBossThread } from "./zhang-boss-thread.js";
 
@@ -65,13 +63,7 @@ export function ZhangBossPage(props: { bridge: RendererBridgeApi }): ReactElemen
     void props.bridge.reportError({ source: "zhang-boss", message });
   }
 
-  function clearDraftAfterOk(text: string, prefix?: string, attach?: ContextAttachHistoryView): void {
-    const entry = buildLocalUserMessage(prefix ? `${prefix}${text}` : text);
-    setPanel((prev) => ({
-      ...prev,
-      messages: [...prev.messages, entry],
-      attachHistory: attach ? [attach, ...prev.attachHistory] : prev.attachHistory,
-    }));
+  function clearDraftAfterOk(): void {
     setDraft("");
   }
 

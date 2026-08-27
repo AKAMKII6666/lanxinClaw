@@ -93,6 +93,26 @@ export class PendingContextQueue {
     const [item] = this.#items.splice(idx, 1);
     return item ?? null;
   }
+
+  /**
+   * 取出全部未消费项。
+   *
+   * @returns 原队列内容
+   */
+  drain(): PendingContextItem[] {
+    const items = [...this.#items];
+    this.#items = [];
+    return items;
+  }
+
+  /**
+   * 从落盘恢复。
+   *
+   * @param items 条目
+   */
+  restore(items: readonly PendingContextItem[]): void {
+    this.#items = items.map((item) => ({ ...item }));
+  }
 }
 
 /**

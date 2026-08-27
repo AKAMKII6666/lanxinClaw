@@ -20,14 +20,48 @@ import type { CompanionProtocolServerOptions } from "./server.js";
 export function enqueueJobPermission(
   options: CompanionProtocolServerOptions,
   envelope: ProtocolEnvelope,
-): { ok: true } | { ok: false; code: string; message: string; retryable: false } {
+):
+  | { ok: true; permissionRequestId: string; request: ReturnType<typeof buildRequest> }
+  | { ok: false; code: string; message: string; retryable: false } {
   const payload = envelope.payload as unknown as JobPayload;
-  const requestedPermissions = normalizePermissions(payload.allowedPermissions);
-  const enqueued = options.backend.getPermissionGate().enqueue({
+  const requestedPermissions = normalizePermissions(payload.allowedPermissions ?? []);
+  if (requestedPermissions.length === 0) {
+    return {
+      ok: false,
+      code: "job_permissions_required",
+      message: "job.create 必须声明至少一个已知 allowedPermissions，空列表不得委派",
+      retryable: false,
+    };
+  }
+  const request = buildRequest(payload, requestedPermissions);
+  const enqueued = options.backend.getPermissionGate().enqueue(request);
+  if (enqueued.ok) {
+    return { ok: true, permissionRequestId: request.permissionRequestId, request };
+  }
+  return {
+    ok: false,
+    code: enqueued.code,
+    message: enqueued.message,
+    retryable: false,
+  };
+}
+
+/**
+ * 组装 gate 请求。
+ *
+ * @param payload job 载荷
+ * @param requestedPermissions 已过滤权限
+ * @returns 请求
+ */
+function buildRequest(
+  payload: JobPayload,
+  requestedPermissions: PermissionId[],
+) {
+  return {
     permissionRequestId: payload.permissionRequestId ?? createPermissionRequestId(),
     jobId: payload.jobId,
     affairId: payload.affairId,
-    requester: "zhang-boss",
+    requester: "zhang-boss" as const,
     requestedPermissions,
     reason: payload.goal,
     risk: riskForPermissions(requestedPermissions),
@@ -35,15 +69,6 @@ export function enqueueJobPermission(
     denyConsequence: "job 将停在 needs_permission，不会委派 OpenClaw 执行",
     requestedAt: new Date().toISOString(),
     expiresAt: null,
-  });
-  if (enqueued.ok) {
-    return { ok: true };
-  }
-  return {
-    ok: false,
-    code: enqueued.code,
-    message: enqueued.message,
-    retryable: false,
   };
 }
 

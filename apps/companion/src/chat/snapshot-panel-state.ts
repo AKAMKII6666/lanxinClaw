@@ -7,7 +7,7 @@
  */
 
 import type { ControlPanelSnapshotView } from "../bridge/contract.js";
-import type { ZhangBossPanelView, ZhangBossPresenceStatus } from "./views.js";
+import type { ChatAttachTarget, ChatContentKind, ZhangBossPanelView, ZhangBossPresenceStatus } from "./views.js";
 
 /**
  * 从 snapshot 投影张老板页面板。
@@ -32,8 +32,28 @@ export function projectZhangBossPanelFromSnapshot(
           progressSummary: snapshot.currentAffair.progressSummary,
         }
       : null,
-    messages: previous?.messages ?? [],
-    attachHistory: previous?.attachHistory ?? [],
+    messages:
+      snapshot.sideChannel?.messages.map((item) => ({
+        messageId: item.messageId,
+        authorKind: item.authorKind === "zhang-boss" || item.authorKind === "companion" ? item.authorKind : "user",
+        text: item.text,
+        sentAt: item.sentAt,
+      })) ??
+      previous?.messages ??
+      [],
+    attachHistory:
+      snapshot.sideChannel?.attachments.map((item) => ({
+        attachId: item.attachId,
+        targetLabel: item.targetLabel,
+        contentKind: (item.contentKind === "path" || item.contentKind === "log" || item.contentKind === "url"
+          ? item.contentKind
+          : "note") as ChatContentKind,
+        text: item.text,
+        deliveryLabel: item.deliveryLabel,
+        attachedAt: item.attachedAt,
+      })) ??
+      previous?.attachHistory ??
+      [],
   };
 }
 

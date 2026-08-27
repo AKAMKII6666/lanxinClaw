@@ -13,6 +13,8 @@ import type { DiagnosticReportView, DiagnosticProbeView } from "../ui/pages/diag
  * 诊断输入。
  */
 export interface BuildDiagnosticReportInput {
+  /** protocol server 是否监听 */
+  protocolServerReady?: boolean;
   /** Gateway URL；空表示未配置 */
   gatewayUrl?: string | null;
   /** Gateway 是否就绪 */
@@ -21,6 +23,8 @@ export interface BuildDiagnosticReportInput {
   lanDiscoveryReady?: boolean;
   /** secure storage 是否可用 */
   secureStorageReady?: boolean;
+  /** 最近 protocol/server 错误码 */
+  recentServerErrorCode?: string | null;
   /** 最近错误 */
   lastError?: DiagnosticReportView["lastError"];
 }
@@ -33,13 +37,20 @@ export interface BuildDiagnosticReportInput {
  */
 export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): DiagnosticReportView {
   const services = [
-    probe("companion.service", "Companion service", "service", "ok", "running", null),
+    probe(
+      "companion.service",
+      "Companion service",
+      "service",
+      input.protocolServerReady === false ? "warn" : "ok",
+      input.protocolServerReady === false ? "protocol server not listening" : "running",
+      input.protocolServerReady === false ? "启动 desktop protocol server 后重试" : null,
+    ),
     probe(
       "openclaw.gateway",
       "OpenClaw Gateway",
       "service",
       input.gatewayReady ? "ok" : "warn",
-      input.gatewayUrl ? "configured" : "missing gateway url",
+      gatewayDetail(input),
       input.gatewayReady ? null : "配置并启动 OpenClaw Gateway 后重试",
     ),
     probe(
@@ -63,7 +74,17 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): D
       "真实电话联调前需确认局域网发现",
     ),
   ] satisfies DiagnosticProbeView[];
-  const overallStatus = services.some((item) => item.status === "error") ? "error" : "warn";
+  if (input.recentServerErrorCode) {
+    services.push(probe(
+      "server.recent_error",
+      "Recent server error",
+      "service",
+      "warn",
+      input.recentServerErrorCode,
+      "查看 companion 日志定位最近协议或运行时错误",
+    ));
+  }
+  const overallStatus = summarizeOverallStatus([...services, ...environment]);
   return {
     schemaVersion: "0.1",
     reportId: `diag_${Date.now()}`,
@@ -72,8 +93,25 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): D
     services,
     environment,
     lastError: input.lastError ?? null,
-    copyText: `overall=${overallStatus}; gateway=${input.gatewayReady ? "ok" : "warn"}; node=${process.version}`,
+    copyText: `overall=${overallStatus}; protocol=${input.protocolServerReady === false ? "warn" : "ok"}; gateway=${input.gatewayReady ? "ok" : "warn"}; node=${process.version}`,
   };
+}
+
+function gatewayDetail(input: BuildDiagnosticReportInput): string {
+  if (input.gatewayReady) {
+    return `ready ${input.gatewayUrl ?? ""}`.trim();
+  }
+  return input.gatewayUrl ? "configured but not ready" : "missing gateway url";
+}
+
+function summarizeOverallStatus(items: readonly DiagnosticProbeView[]): DiagnosticReportView["overallStatus"] {
+  if (items.some((item) => item.status === "error")) {
+    return "error";
+  }
+  if (items.some((item) => item.status === "warn" || item.status === "unknown")) {
+    return "warn";
+  }
+  return "ok";
 }
 
 /**
@@ -107,4 +145,3 @@ function gitDetail(): string {
     return "git unavailable";
   }
 }
-

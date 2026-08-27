@@ -66,12 +66,41 @@ export async function cancelAdapterJob(
     store.set(job);
     return { ok: true, job };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "cancel_run_failed";
+    const runtime = runtimeErrorResult(err, "cancel_run_failed");
     return {
       ok: false,
-      code: "runtime_cancel_failed",
-      message,
-      retryable: true,
+      code: runtime.code,
+      message: runtime.message,
+      retryable: runtime.retryable,
     };
   }
+}
+
+function runtimeErrorResult(err: unknown, fallbackMessage: string): { code: string; message: string; retryable: boolean } {
+  if (err && typeof err === "object") {
+    const typed = err as { code?: unknown; message?: unknown; retryable?: unknown };
+    if (typeof typed.code === "string" && typed.code.startsWith("gateway_")) {
+      return {
+        code: typed.code,
+        message: typeof typed.message === "string" ? typed.message : fallbackMessage,
+        retryable: typeof typed.retryable === "boolean" ? typed.retryable : isRetryableGatewayCode(typed.code),
+      };
+    }
+  }
+  const message = err instanceof Error ? err.message : fallbackMessage;
+  if (message.startsWith("gateway_")) {
+    return { code: message, message, retryable: isRetryableGatewayCode(message) };
+  }
+  return { code: "runtime_cancel_failed", message, retryable: true };
+}
+
+function isRetryableGatewayCode(code: string): boolean {
+  return ![
+    "gateway_url_missing",
+    "gateway_agent_missing",
+    "gateway_scope_missing",
+    "gateway_auth_missing",
+    "gateway_connect_rejected",
+    "gateway_invalid_run",
+  ].includes(code);
 }

@@ -1,0 +1,19 @@
+{
+  "protocolVersion": "0.1",
+  "messageId": "msg_chat_read_receipt_001",
+  "correlationId": "msg_chat_message_001",
+  "sentAt": "2026-07-23T01:04:00.000Z",
+  "source": {
+    "kind": "phone",
+    "deviceId": "phone_lanxing_001"
+  },
+  "target": {
+    "kind": "companion",
+    "deviceId": "desktop_liao_pc"
+  },
+  "type": "chat.read_receipt",
+  "payload": {
+    "chatMessageId": "chat_msg_001",
+    "readAt": "2026-07-23T01:04:00.000Z"
+  }
+}

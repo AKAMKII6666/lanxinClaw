@@ -12,6 +12,11 @@ import type {
   BridgeClientErrorReport,
   BridgeUiAction,
   ControlPanelSnapshotView,
+  OnboardingPhase,
+  OnboardingStatusView,
+  OnboardingSubmitPayload,
+  OnboardingSubmitResult,
+  RendererLogEntry,
 } from "../../bridge/contract.js";
 import type { CompanionBridgeHost } from "../../bridge/host.js";
 import type { PendingPermissionCardView } from "../../permissions/views.js";
@@ -33,6 +38,21 @@ export interface RendererBridgeApi {
   listPendingPermissionCards(): Promise<PendingPermissionCardView[]>;
   /** 拉取脱敏诊断报告 */
   getDiagnosticReport(): Promise<DiagnosticReportView>;
+  /** 上报 renderer 日志（只读；module 固定为 ui） */
+  log(entry: RendererLogEntry): Promise<BridgeCallResult>;
+  /** onboarding 配置门 */
+  onboarding: {
+    /** 拉取状态 */
+    getStatus(): Promise<OnboardingStatusView>;
+    /** 提交配置并执行探针 */
+    submit(config: OnboardingSubmitPayload): Promise<OnboardingSubmitResult>;
+    /** 已配置冷启动拉起运行时 */
+    bootstrapRuntime(): Promise<OnboardingSubmitResult>;
+    /** 清除配置 */
+    clear(): Promise<OnboardingStatusView>;
+    /** 订阅提交/冷启动阶段；返回取消函数 */
+    subscribeProgress(listener: (phase: OnboardingPhase) => void): () => void;
+  };
 }
 
 /**
@@ -96,6 +116,34 @@ export function createMemoryRendererBridge(host: CompanionBridgeHost): RendererB
         lastError: null,
         copyText: `overall=${snapshot.clawCore.adapterReady ? "ok" : "warn"}; companion=${snapshot.companion.status}; device=${snapshot.device.status}`,
       };
+    },
+    async log(entry) {
+      const line = `[ui:${entry.level}] ${entry.message}`;
+      if (entry.level === "error") {
+        console.error(line, entry.meta ?? "");
+      } else if (entry.level === "warn") {
+        console.warn(line, entry.meta ?? "");
+      } else {
+        console.info(line, entry.meta ?? "");
+      }
+      return { ok: true };
+    },
+    onboarding: {
+      async getStatus() {
+        return { status: "ready", lastError: null };
+      },
+      async submit(_config) {
+        return { ok: false, error: { code: "onboarding_unavailable", message: "内存模式未启用 onboarding", retryable: false }, status: { status: "ready", lastError: null } };
+      },
+      async bootstrapRuntime() {
+        return { ok: true, status: { status: "ready", lastError: null } };
+      },
+      async clear() {
+        return { status: "ready", lastError: null };
+      },
+      subscribeProgress(_listener) {
+        return () => undefined;
+      },
     },
   };
 }

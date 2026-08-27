@@ -13,6 +13,7 @@ export type SchemaFileName =
   | "envelope.schema.json"
   | "affair.schema.json"
   | "job.schema.json"
+  | "job-cancel.schema.json"
   | "pairing.schema.json"
   | "session.schema.json"
   | "chat.schema.json"
@@ -44,7 +45,7 @@ export const MESSAGE_PAYLOAD_SCHEMA: Record<MessageType, SchemaFileName> = {
   "job.blocked": "job.schema.json",
   "job.completed": "job.schema.json",
   "job.failed": "job.schema.json",
-  "job.cancel": "job.schema.json",
+  "job.cancel": "job-cancel.schema.json",
   "chat.message": "chat.schema.json",
   "chat.context_attach": "chat.schema.json",
   "chat.read_receipt": "chat.schema.json",

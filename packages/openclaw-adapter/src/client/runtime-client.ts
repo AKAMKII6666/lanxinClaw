@@ -14,6 +14,8 @@ import type { OpenClawRunStatus } from "../status/openclaw-run-status.js";
 export interface CreateOpenClawRunParams {
   /** 交给 agent 的任务描述（来自 job.goal） */
   input: string;
+  /** 幂等键；真实 Gateway 直接作为 runId，重试不重复创建 */
+  idempotencyKey?: string;
   /** 工作区提示；可空 */
   workspaceHint?: string | null;
   /** 会话键；建议绑定 jobId 以便取消与诊断 */

@@ -25,6 +25,8 @@ describe("permission gate", () => {
     const allow = gate.decide("perm_req_001", "allow_once", "2026-07-23T01:10:00.000Z");
     assert.equal(allow.ok, true);
     assert.equal(allow.actionBlocked, false);
+    assert.equal(gate.hasGrant("job_fix_code_001", "workspace.write"), true);
+    assert.equal(gate.hasGrant("job_fix_code_001", "workspace.write"), true);
     assert.equal(gate.isGranted("job_fix_code_001", "workspace.write"), true);
     assert.equal(gate.isGranted("job_fix_code_001", "workspace.write"), false);
     assert.equal(gate.listPendingCards().length, 0);
@@ -46,6 +48,7 @@ describe("permission gate", () => {
     const denied = gate2.decide("perm_req_deny", "deny");
     assert.equal(denied.ok, true);
     assert.equal(denied.actionBlocked, true);
+    assert.equal(gate2.hasGrant("job_2", "command.run"), false);
     assert.equal(gate2.isGranted("job_2", "command.run"), false);
   });
 

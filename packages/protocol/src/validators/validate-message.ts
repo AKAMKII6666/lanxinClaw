@@ -36,7 +36,11 @@ import {
   validateSessionOpenPayload,
   validateSessionReauthRequiredPayload,
 } from "./payloads/session/session.js";
-import { validateAffairPayload, validateJobPayload } from "./payloads/affair-job/affair-job.js";
+import {
+  validateAffairPayload,
+  validateJobCancelPayload,
+  validateJobPayload,
+} from "./payloads/affair-job/affair-job.js";
 import type { ValidateResult } from "./result.js";
 
 type PayloadValidator = (value: unknown) => ValidateResult<unknown>;
@@ -64,7 +68,7 @@ const PAYLOAD_VALIDATORS: Record<MessageType, PayloadValidator> = {
   "job.blocked": validateJobPayload,
   "job.completed": validateJobPayload,
   "job.failed": validateJobPayload,
-  "job.cancel": validateJobPayload,
+  "job.cancel": validateJobCancelPayload,
   "chat.message": validateChatMessagePayload,
   "chat.context_attach": validateChatContextAttachPayload,
   "chat.read_receipt": validateChatReadReceiptPayload,
