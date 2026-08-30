@@ -197,6 +197,28 @@ export function buildJobFailedEnvelope(
 }
 
 /**
+ * 构造 job.canceled。
+ *
+ * @param party 寻址
+ * @param payload job 载荷（status=canceled）
+ * @param correlationId 可选关联 job.cancel messageId
+ * @returns envelope
+ */
+export function buildJobCanceledEnvelope(
+  party: OutboundParty,
+  payload: JobPayload,
+  correlationId?: string,
+): ProtocolEnvelope<any> {
+  return createEnvelope({
+    source: { kind: "companion", deviceId: party.desktopDeviceId },
+    target: { kind: "phone", deviceId: party.phoneDeviceId },
+    type: "job.canceled",
+    ...(correlationId ? { correlationId } : {}),
+    payload,
+  });
+}
+
+/**
  * 构造 affair.update。
  *
  * @param party 寻址

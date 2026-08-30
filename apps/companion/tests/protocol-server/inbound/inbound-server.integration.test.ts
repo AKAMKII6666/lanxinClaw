@@ -112,8 +112,8 @@ describe("protocol server inbound guards", () => {
         type: "job.cancel",
         payload: { jobId: "job_cancel_np", affairId: "affair_cancel_np" },
       })));
-      const progress = await reader.nextEnvelope("job.progress");
-      assert.equal((progress.payload as { status?: string }).status, "canceled");
+      const canceled = await reader.nextEnvelope("job.canceled");
+      assert.equal((canceled.payload as { status?: string }).status, "canceled");
       const cancelAck = await reader.next("job.cancel ack");
       assert.equal(cancelAck.ok, true);
       assert.equal(backend.getState().jobs.get("job_cancel_np")?.status, "canceled");

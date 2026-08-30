@@ -78,6 +78,7 @@ describe("protocol message contract 正反例", () => {
     const files = [
       "affair-create.envelope.json",
       "job-blocked.envelope.json",
+      "job-canceled.envelope.json",
       "job-completed.envelope.json",
       "tasks/job-progress.envelope.json",
       "tasks/affair-waiting-acceptance.envelope.json",
@@ -96,6 +97,17 @@ describe("protocol message contract 正反例", () => {
     assert.equal(
       validatePayloadForType("job.progress", jobPayload({ status: "running", progressSummary: "50%" }))
         .ok,
+      true,
+    );
+    assert.equal(
+      validatePayloadForType(
+        "job.canceled",
+        jobPayload({
+          status: "canceled",
+          statusReasonCode: "openclaw.cancel_ack",
+          statusObservedAt: "2026-07-22T00:07:00.000Z",
+        }),
+      ).ok,
       true,
     );
     const perm = validatePayloadForType("permission.request", {
@@ -148,6 +160,31 @@ describe("protocol message contract 正反例", () => {
       validatePayloadForType("job.create", jobPayload({ allowedPermissions: "workspace.read" })).ok,
       false,
     );
+    assert.equal(
+      validatePayloadForType("job.create", jobPayload({ purpose: "remote_shell" })).ok,
+      false,
+    );
+    assert.equal(
+      validatePayloadForType("job.create", jobPayload({ purpose: "exploration" })).ok,
+      true,
+    );
+    assert.equal(
+      validatePayloadForType("job.failed", jobPayload({ status: "failed", statusObservedAt: "刚刚" })).ok,
+      false,
+    );
+    assert.equal(
+      validatePayloadForType("job.completed", jobPayload({ status: "running" })).ok,
+      false,
+    );
+    assert.equal(
+      validateMessage(createEnvelope({
+        source: { kind: "companion", deviceId: "d1" },
+        target: { kind: "phone", deviceId: "p1" },
+        type: "job.failed",
+        payload: jobPayload({ status: "completed" }),
+      })).ok,
+      false,
+    );
   });
 
   it("反例：chat.message 不得冒充系统指令字段（未知 key）", () => {
@@ -177,6 +214,10 @@ describe("protocol message contract 正反例", () => {
 });
 
 describe("protocol 状态机 contract", () => {
+  it("job 可从 queued 快速完成，但 completed 后仍是终态", () => {
+    assert.equal(canTransitionJobStatus("queued", "completed"), true);
+  });
+
   it("job.completed 是终态，不得再迁出", () => {
     assert.equal(canTransitionJobStatus("completed", "running"), false);
     assert.equal(canTransitionJobStatus("completed", "closed" as never), false);

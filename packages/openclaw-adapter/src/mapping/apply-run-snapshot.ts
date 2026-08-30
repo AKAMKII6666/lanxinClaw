@@ -15,10 +15,16 @@ import {
   type JobStatus,
 } from "@lanxin-claw/protocol";
 import type { OpenClawRunSnapshot } from "../client/runtime-client.js";
+import {
+  buildExecutionEvidence,
+  type OpenClawExecutionEvidence,
+} from "../evidence/openclaw-execution-evidence.js";
 import type { AdapterJobRecord } from "../jobs/job-types.js";
-import { mapOpenClawRunStatusToJobStatus } from "./map-run-status.js";
+import { decideJobFromEvidence } from "./decide-job-from-evidence.js";
 
 const JOB_TERMINAL = new Set<JobStatus>(["completed", "failed", "canceled"]);
+const ISO_DATE_TIME_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 /**
  * 在协议状态机上解析可采纳的下一 status。
@@ -65,20 +71,68 @@ export function applyRunSnapshotToJob(
   job: AdapterJobRecord,
   snapshot: OpenClawRunSnapshot,
 ): AdapterJobRecord {
-  const mapped = mapOpenClawRunStatusToJobStatus(snapshot.status);
-  if (JOB_TERMINAL.has(job.status) && mapped !== job.status) {
+  const evidence = evidenceForSnapshot(job, snapshot);
+  const decided = decideJobFromEvidence(job, evidence);
+  if (JOB_TERMINAL.has(job.status) && decided.status !== job.status) {
     return job;
   }
   const guarded =
-    JOB_TERMINAL.has(job.status) && !JOB_TERMINAL.has(mapped) ? job.status : mapped;
+    JOB_TERMINAL.has(job.status) && !JOB_TERMINAL.has(decided.status) ? job.status : decided.status;
   const nextStatus = resolveNextJobStatus(job.status, guarded);
+  const now = new Date().toISOString();
   return {
     ...job,
     status: nextStatus,
     openclawRunId: snapshot.runId,
-    progressSummary: snapshot.summary ?? job.progressSummary,
-    blockedReason: snapshot.blockedReason ?? job.blockedReason,
-    resumeCondition: snapshot.resumeCondition ?? job.resumeCondition,
+    progressSummary: decided.progressSummary || (snapshot.summary ?? job.progressSummary),
+    blockedReason:
+      nextStatus === "blocked" || nextStatus === "failed"
+        ? decided.blockedReason ?? snapshot.blockedReason ?? job.blockedReason
+        : null,
+    resumeCondition:
+      nextStatus === "blocked" || nextStatus === "needs_permission"
+        ? decided.resumeCondition ?? snapshot.resumeCondition ?? job.resumeCondition
+        : null,
     lastRunStatus: snapshot.status,
+    statusReasonCode: decided.statusReasonCode,
+    statusObservedAt: decided.statusObservedAt,
+    lastEvidenceKind: decided.evidenceKind,
+    lastEvidenceStrength: decided.evidenceStrength,
+    updatedAt: now,
   };
+}
+
+function evidenceForSnapshot(
+  job: AdapterJobRecord,
+  snapshot: OpenClawRunSnapshot,
+): OpenClawExecutionEvidence {
+  const sessionKey = job.openclawSessionKey ?? `lanxing-job:${job.jobId}`;
+  if (snapshot.evidence) {
+    return {
+      ...snapshot.evidence,
+      jobId: snapshot.evidence.jobId ?? job.jobId,
+      affairId: snapshot.evidence.affairId ?? job.affairId,
+      sessionKey: snapshot.evidence.sessionKey ?? sessionKey,
+      observedAt: normalizeObservedAt(snapshot.evidence.observedAt),
+      toolFindings: [...(snapshot.evidence.toolFindings ?? [])],
+      sourceStatuses: snapshot.evidence.sourceStatuses ?? [snapshot.status],
+    };
+  }
+  return buildExecutionEvidence({
+    runId: snapshot.runId,
+    status: snapshot.status,
+    ...(snapshot.summary !== undefined ? { summary: snapshot.summary } : {}),
+    ...(snapshot.blockedReason !== undefined ? { blockedReason: snapshot.blockedReason } : {}),
+    ...(snapshot.resumeCondition !== undefined ? { resumeCondition: snapshot.resumeCondition } : {}),
+    jobId: job.jobId,
+    affairId: job.affairId,
+    sessionKey,
+  });
+}
+
+function normalizeObservedAt(value: string | undefined): string {
+  if (typeof value === "string" && ISO_DATE_TIME_RE.test(value)) {
+    return value;
+  }
+  return new Date().toISOString();
 }

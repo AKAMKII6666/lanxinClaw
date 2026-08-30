@@ -26,6 +26,9 @@ export function toJobPayload(
     blockedReason: string | null;
     resumeCondition: string | null;
     permissionRequestId?: string | null;
+    purpose?: "execution" | "exploration";
+    statusReasonCode?: string | null;
+    statusObservedAt?: string | null;
   },
   status: JobStatus,
 ): JobPayload {
@@ -34,6 +37,7 @@ export function toJobPayload(
     affairId: job.affairId,
     executor: "openclaw",
     status,
+    purpose: job.purpose ?? "execution",
     goal: job.goal,
     workspaceHint: job.workspaceHint ?? null,
     allowedPermissions: [...job.allowedPermissions],
@@ -41,6 +45,8 @@ export function toJobPayload(
     blockedReason: job.blockedReason ?? null,
     resumeCondition: job.resumeCondition ?? null,
     permissionRequestId: job.permissionRequestId ?? null,
+    statusReasonCode: job.statusReasonCode ?? null,
+    statusObservedAt: job.statusObservedAt ?? null,
   };
 }
 
@@ -52,7 +58,7 @@ export function toJobPayload(
  */
 export function statusToEnvelopeType(
   status: JobStatus,
-): "job.accepted" | "job.progress" | "job.completed" | "job.blocked" | "job.failed" {
+): "job.accepted" | "job.progress" | "job.needs_permission" | "job.completed" | "job.blocked" | "job.failed" | "job.canceled" {
   switch (status) {
     case "queued":
     case "running":
@@ -64,8 +70,8 @@ export function statusToEnvelopeType(
     case "failed":
       return "job.failed";
     case "canceled":
-      return "job.progress";
+      return "job.canceled";
     case "needs_permission":
-      return "job.progress";
+      return "job.needs_permission";
   }
 }

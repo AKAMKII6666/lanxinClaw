@@ -11,6 +11,8 @@ import type { OpenClawRuntimeClient } from "../client/runtime-client.js";
 import { applyRunSnapshotToJob } from "../mapping/apply-run-snapshot.js";
 import type { AdapterJobStore } from "./job-store.js";
 import type { AdapterJobResult } from "./job-types.js";
+import { validateRunSnapshotIdentity } from "../evidence/snapshot-identity.js";
+import { runtimeErrorResult } from "../client/runtime-error-result.js";
 
 const TERMINAL = new Set(["completed", "failed", "canceled"]);
 
@@ -55,18 +57,36 @@ export async function cancelAdapterJob(
       status: "canceled" as const,
       progressSummary: existing.progressSummary || "canceled_before_run",
       lastRunStatus: "cancelled",
+      statusReasonCode: "openclaw.cancel_before_run",
+      statusObservedAt: new Date().toISOString(),
+      lastEvidenceKind: "local.cancel_ack",
+      lastEvidenceStrength: "strong",
+      updatedAt: new Date().toISOString(),
     };
     store.set(job);
     return { ok: true, job };
   }
 
   try {
-    const snapshot = await runtime.cancelRun(existing.openclawRunId);
+    const snapshot = await runtime.cancelRun(existing.openclawRunId, {
+      jobId: existing.jobId,
+      affairId: existing.affairId,
+      sessionKey: existing.openclawSessionKey ?? `lanxing-job:${existing.jobId}`,
+    });
+    const identity = validateRunSnapshotIdentity(existing, snapshot);
+    if (!identity.ok) {
+      return {
+        ok: false,
+        code: "runtime_evidence_mismatch",
+        message: identity.message,
+        retryable: false,
+      };
+    }
     const job = applyRunSnapshotToJob(existing, snapshot);
     store.set(job);
     return { ok: true, job };
   } catch (err) {
-    const runtime = runtimeErrorResult(err, "cancel_run_failed");
+    const runtime = runtimeErrorResult(err, "runtime_cancel_failed", "cancel_run_failed");
     return {
       ok: false,
       code: runtime.code,
@@ -74,33 +94,4 @@ export async function cancelAdapterJob(
       retryable: runtime.retryable,
     };
   }
-}
-
-function runtimeErrorResult(err: unknown, fallbackMessage: string): { code: string; message: string; retryable: boolean } {
-  if (err && typeof err === "object") {
-    const typed = err as { code?: unknown; message?: unknown; retryable?: unknown };
-    if (typeof typed.code === "string" && typed.code.startsWith("gateway_")) {
-      return {
-        code: typed.code,
-        message: typeof typed.message === "string" ? typed.message : fallbackMessage,
-        retryable: typeof typed.retryable === "boolean" ? typed.retryable : isRetryableGatewayCode(typed.code),
-      };
-    }
-  }
-  const message = err instanceof Error ? err.message : fallbackMessage;
-  if (message.startsWith("gateway_")) {
-    return { code: message, message, retryable: isRetryableGatewayCode(message) };
-  }
-  return { code: "runtime_cancel_failed", message, retryable: true };
-}
-
-function isRetryableGatewayCode(code: string): boolean {
-  return ![
-    "gateway_url_missing",
-    "gateway_agent_missing",
-    "gateway_scope_missing",
-    "gateway_auth_missing",
-    "gateway_connect_rejected",
-    "gateway_invalid_run",
-  ].includes(code);
 }

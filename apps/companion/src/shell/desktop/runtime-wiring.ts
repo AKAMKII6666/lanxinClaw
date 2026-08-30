@@ -14,7 +14,8 @@ import { reconcileDelegatorOnStartup } from "../../jobs/delegation/delegator-rec
 import { JobDelegator } from "../../jobs/delegation/delegator.js";
 import type { LoggerRegistry } from "../../logging/logger.js";
 import type { CompanionProtocolServerHandle } from "../../protocol-server/server.js";
-import { startDiscoveryAdvertiser } from "../../discovery/advertise.js";
+import { startDiscoveryAdvertiser, type StartAdvertiserResult } from "../../discovery/advertise.js";
+import { selectLanMdnsInterface } from "../../discovery/lan-mdns-interface.js";
 import { createBonjourMdnsTransport } from "../../discovery/transport/bonjour.js";
 import type { Logger } from "pino";
 
@@ -49,27 +50,73 @@ export async function startShellLanDiscovery(deps: {
   if (!deps.enabled) {
     return;
   }
-  const transport = createBonjourMdnsTransport();
-  const started = await startDiscoveryAdvertiser(transport, {
-    instanceName: "Lanxin Companion",
-    port: deps.protocolPort,
-    advertisement: {
-      deviceName: "Lanxin Companion",
-      deviceIdHint: deps.desktopDeviceId.slice(0, 8),
-      serviceVersion: "0.1.0-dev",
-      protocolVersion: PROTOCOL_VERSION,
-      pairingAvailable: true,
-      pairedPhoneIds: [],
-      capabilities: ["affair", "job", "chat"],
-    },
+  const explicitInterfaceAddress = process.env.LANXIN_MDNS_INTERFACE_ADDRESS;
+  const mdnsInterface = selectLanMdnsInterface(
+    undefined,
+    explicitInterfaceAddress !== undefined ? { explicitAddress: explicitInterfaceAddress } : {},
+  );
+  if (!mdnsInterface.ok) {
+    deps.onResult({ lanDiscoveryReady: false, recentServerErrorCode: mdnsInterface.code });
+    deps.logger.warn({ code: mdnsInterface.code }, "mDNS 广告网卡选择失败");
+    return;
+  }
+  const transport = createBonjourMdnsTransport({
+    interfaceAddress: mdnsInterface.candidate.address,
   });
+  let started: StartAdvertiserResult;
+  try {
+    started = await startDiscoveryAdvertiser(transport, {
+      instanceName: "Lanxin Companion",
+      port: deps.protocolPort,
+      advertisement: {
+        deviceName: "Lanxin Companion",
+        deviceIdHint: deps.desktopDeviceId.slice(0, 8),
+        serviceVersion: "0.1.0-dev",
+        protocolVersion: PROTOCOL_VERSION,
+        pairingAvailable: true,
+        pairedPhoneIds: [],
+        capabilities: ["affair", "job", "chat"],
+      },
+    });
+  } catch (error) {
+    await transport.destroy();
+    deps.onResult({
+      lanDiscoveryReady: false,
+      recentServerErrorCode: "mdns_advertise_start_failed",
+    });
+    deps.logger.warn(
+      {
+        code: "mdns_advertise_start_failed",
+        message: error instanceof Error ? error.message : String(error),
+        mdnsInterfaceAddress: mdnsInterface.candidate.address,
+        mdnsInterfaceName: mdnsInterface.candidate.name,
+      },
+      "mDNS 广告启动异常",
+    );
+    return;
+  }
   if (!started.ok) {
+    await transport.destroy();
     deps.onResult({ lanDiscoveryReady: false, recentServerErrorCode: started.error.code });
-    deps.logger.warn({ code: started.error.code }, "mDNS 广告启动失败");
+    deps.logger.warn(
+      {
+        code: started.error.code,
+        mdnsInterfaceAddress: mdnsInterface.candidate.address,
+        mdnsInterfaceName: mdnsInterface.candidate.name,
+      },
+      "mDNS 广告启动失败",
+    );
     return;
   }
   deps.onResult({ lanDiscoveryReady: true });
-  deps.logger.info({ port: deps.protocolPort }, "mDNS 广告已启动");
+  deps.logger.info(
+    {
+      port: deps.protocolPort,
+      mdnsInterfaceAddress: mdnsInterface.candidate.address,
+      mdnsInterfaceName: mdnsInterface.candidate.name,
+    },
+    "mDNS 广告已启动",
+  );
 }
 
 
@@ -148,6 +195,7 @@ export function createShellJobDelegator(deps: {
     gate: deps.backend.getPermissionGate(),
     getJobStatus: (jobId) => deps.backend.getState().jobs.get(jobId)?.status,
     getWorkspaceHint: (jobId) => deps.backend.getState().jobs.get(jobId)?.workspaceHint ?? null,
+    getJobPurpose: (jobId) => deps.backend.getState().jobs.get(jobId)?.purpose,
     authorizedDesktopRoot: deps.workspace,
     getAffair: (affairId) => deps.backend.getState().affairs.get(affairId),
     getPhoneDeviceId: () => deps.backend.getState().connection.phoneDeviceId ?? null,

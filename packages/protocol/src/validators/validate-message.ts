@@ -6,9 +6,10 @@
  * 纯函数：无 I/O。
  */
 
-import { unknownMessageType } from "../errors/protocol-error.js";
+import { unknownMessageType, validationFailed } from "../errors/protocol-error.js";
 import type { ProtocolEnvelope } from "../messages/envelope.js";
 import { isMessageType, type MessageType } from "../messages/message-type.js";
+import type { JobPayload } from "../messages/payloads/core.js";
 import { validateEnvelope } from "./envelope.js";
 import {
   validateChatContextAttachPayload,
@@ -69,11 +70,23 @@ const PAYLOAD_VALIDATORS: Record<MessageType, PayloadValidator> = {
   "job.completed": validateJobPayload,
   "job.failed": validateJobPayload,
   "job.cancel": validateJobCancelPayload,
+  "job.canceled": validateJobPayload,
   "chat.message": validateChatMessagePayload,
   "chat.context_attach": validateChatContextAttachPayload,
   "chat.read_receipt": validateChatReadReceiptPayload,
   "permission.request": validatePermissionRequestPayload,
   "permission.decision": validatePermissionDecisionPayload,
+};
+
+const JOB_TYPE_STATUSES: Partial<Record<MessageType, readonly JobPayload["status"][]>> = {
+  "job.create": ["queued"],
+  "job.accepted": ["queued", "running"],
+  "job.progress": ["queued", "running"],
+  "job.needs_permission": ["needs_permission"],
+  "job.blocked": ["blocked"],
+  "job.completed": ["completed"],
+  "job.failed": ["failed"],
+  "job.canceled": ["canceled"],
 };
 
 /**
@@ -87,7 +100,33 @@ export function validatePayloadForType(type: string, payload: unknown): Validate
   if (!isMessageType(type)) {
     return { ok: false, error: unknownMessageType(type) };
   }
-  return PAYLOAD_VALIDATORS[type](payload);
+  const validated = PAYLOAD_VALIDATORS[type](payload);
+  if (!validated.ok) {
+    return validated;
+  }
+  return validateJobStatusForType(type, validated.value) ?? validated;
+}
+
+function validateJobStatusForType(
+  type: MessageType,
+  payload: unknown,
+): ValidateResult<never> | null {
+  const allowed = JOB_TYPE_STATUSES[type];
+  if (!allowed) {
+    return null;
+  }
+  const status = (payload as JobPayload).status;
+  if (allowed.includes(status)) {
+    return null;
+  }
+  return {
+    ok: false,
+    error: validationFailed("job message type 与 payload.status 不一致", {
+      type,
+      status,
+      allowed: [...allowed],
+    }),
+  };
 }
 
 /**

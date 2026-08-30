@@ -51,11 +51,13 @@ apiKey 使用 env ref，明文只经子进程环境变量注入，不落配置�
 ## 5. Gateway 线协议（协议版本 4）与 adapter 校准
 
 - 握手：WS 打开后服务端先发事件 `connect.challenge { nonce }`；客户端回 `req method="connect"`，params 含 `minProtocol/maxProtocol=4`、`role="operator"`、`scopes=["operator.read","operator.write"]`、`client { id: "gateway-client", mode: "backend", ... }`、`auth { token }`。client.id 有白名单，自定义 id 会被拒绝。缺 `operator.write` 时 `agent` RPC 返回 `missing scope: operator.write`。这些是 OpenClaw Gateway 控制面 scope，不是澜星 `workspace.read` 权限 id。修改 handshake 后必须**重启 Companion 进程**才会加载新 transport；只重跑配置门探针不够。
-- 创建 run：`req method="agent"`，params `{ message, idempotencyKey（必填，作为 runId）, agentId?, sessionKey?, timeout? }`；重复 idempotencyKey 幂等返回 in_flight。
-- 读取：`req method="agent.wait" { runId, timeoutMs? }`，只返回终态；`status: "timeout"` 表示仍在运行。
+- 创建 run：`req method="agent"`，params `{ message, idempotencyKey（必填，作为 runId）, agentId?, sessionKey?, timeout? }`；重复 idempotencyKey 幂等返回 `in_flight`，不得因此创建第二个 Lanxin job。
+- 读取：`req method="agent.wait" { runId, timeoutMs? }`，返回 `ok/error/timeout` 粗状态。`ok` 只证明 agent loop 正常结束，不等于业务成功；`timeout` 需区分 wait-only timeout 与 run terminal timeout。
 - 取消：`req method="chat.abort" { sessionKey?, runId? }`。
-- 进度：MVP 用短超时轮询 `agent.wait`；后续可升级为长连接事件订阅（`sessions.subscribe`）。
+- 进度：MVP 用短超时轮询 `agent.wait`；后续升级为长连接 observer，声明 `caps: ["tool-events"]`，并结合 event、audit、task、history 做状态 reconcile。
 - `packages/openclaw-adapter` 的 raw-ws transport 已按上述协议校准；`createJob` 以 `lanxing-job:<jobId>` 作为 idempotencyKey。
+
+状态细节以 [OpenClaw状态观测与探针.md](OpenClaw状态观测与探针.md) 和 [OpenClaw到Lanxin状态映射.md](OpenClaw到Lanxin状态映射.md) 为准。
 
 ## 6. 生命周期与 onboarding
 

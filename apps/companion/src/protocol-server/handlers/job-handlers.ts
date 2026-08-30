@@ -15,8 +15,8 @@ import {
   tryClaimJobCreate,
 } from "../job-create-precheck.js";
 import {
+  buildJobCanceledEnvelope,
   buildJobNeedsPermissionEnvelope,
-  buildJobProgressEnvelope,
   buildPermissionRequestEnvelope,
 } from "../outbound-envelopes.js";
 import type { HandleProtocolSocketMessageInput } from "../router.js";
@@ -168,9 +168,11 @@ function applyJobCanceled(
     ...existing,
     status: "canceled",
     progressSummary: existing.progressSummary || "canceled_by_phone",
+    statusReasonCode: "lanxin.phone_cancel_requested",
+    statusObservedAt: new Date().toISOString(),
   };
   const party = resolveOutboundParty(input);
-  const envelope = buildJobProgressEnvelope(
+  const envelope = buildJobCanceledEnvelope(
     party ?? {
       desktopDeviceId: input.options.pairing.desktopDeviceId,
       phoneDeviceId: "unknown",

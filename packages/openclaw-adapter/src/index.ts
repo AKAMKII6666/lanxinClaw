@@ -30,6 +30,7 @@ export { cancelAdapterJob } from "./jobs/cancel-job.js";
 export type {
   OpenClawRuntimeClient,
   CreateOpenClawRunParams,
+  OpenClawRunContext,
   OpenClawRunSnapshot,
 } from "./client/runtime-client.js";
 
@@ -52,6 +53,7 @@ export {
   createUnavailableGatewayTransport,
   GatewayTransportError,
   type GatewayCreateRunRequest,
+  type GatewayRunContext,
   type GatewayTransport,
 } from "./client/gateway/transport.js";
 export {
@@ -79,3 +81,17 @@ export {
 } from "./status/openclaw-run-status.js";
 
 export { mapOpenClawRunStatusToJobStatus } from "./mapping/map-run-status.js";
+export { decideJobFromEvidence, type OpenClawToLanxinJobDecision } from "./mapping/decide-job-from-evidence.js";
+export {
+  buildExecutionEvidence,
+  type OpenClawEvidenceKind,
+  type OpenClawEvidenceStrength,
+  type OpenClawExecutionEvidence,
+  type OpenClawFinalReplyEvidence,
+  type OpenClawGatewayCapabilities,
+  type OpenClawLifecycleEvidence,
+  type OpenClawProbeResult,
+  type OpenClawTaskEvidence,
+  type OpenClawToolFinding,
+  type OpenClawToolFindingStatus,
+} from "./evidence/openclaw-execution-evidence.js";

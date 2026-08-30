@@ -6,12 +6,16 @@
  * 副作用：真实实现会产生网络 I/O；fake 仅内存。
  */
 
-import type { OpenClawRunSnapshot } from "../runtime-client.js";
+import type { OpenClawRunContext, OpenClawRunSnapshot } from "../runtime-client.js";
 
 /**
  * Gateway 创建 run 的入参。
  */
 export interface GatewayCreateRunRequest {
+  /** Lanxin job id；仅用于证据关联 */
+  jobId?: string;
+  /** Lanxin affair id；仅用于证据关联 */
+  affairId?: string;
   /** Gateway agent id */
   agentId: string;
   /** 幂等键（agent 方法 idempotencyKey）；缺省按 sessionKey 派生 */
@@ -27,6 +31,9 @@ export interface GatewayCreateRunRequest {
   /** 超时毫秒；可空 */
   timeoutMs: number | null;
 }
+
+/** 读取/取消 Gateway run 时携带的关联上下文。 */
+export type GatewayRunContext = OpenClawRunContext;
 
 /**
  * Gateway transport。
@@ -46,7 +53,7 @@ export interface GatewayTransport {
    * @param runId run id
    * @returns 规范化 run 快照
    */
-  getRun(runId: string): Promise<OpenClawRunSnapshot>;
+  getRun(runId: string, context?: GatewayRunContext): Promise<OpenClawRunSnapshot>;
 
   /**
    * 取消 Gateway run。
@@ -54,7 +61,7 @@ export interface GatewayTransport {
    * @param runId run id
    * @returns 规范化 run 快照
    */
-  cancelRun(runId: string): Promise<OpenClawRunSnapshot>;
+  cancelRun(runId: string, context?: GatewayRunContext): Promise<OpenClawRunSnapshot>;
 }
 
 /**

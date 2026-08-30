@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  GatewayTransportError,
   OpenClawAdapter,
   createMutableMockOpenClawRuntimeClient,
   mapOpenClawRunStatusToJobStatus,
@@ -96,6 +97,156 @@ describe("applyRunSnapshotToJob 遵守 canTransitionJobStatus", () => {
     const next = applyRunSnapshotToJob(baseJob("blocked"), snap("accepted"));
     assert.equal(next.status, "running");
   });
+
+  it("wait ok 但最终回复显示未完成时进入 blocked 而不是 completed", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        jobId: "job_apply",
+        affairId: "affair_apply",
+        sessionKey: "lanxing-job:job_apply",
+        observedAt: "2026-07-22T00:00:00.000Z",
+        wait: { status: "ok", endedAt: "2026-07-22T00:00:00.000Z" },
+        lifecycle: { endedAt: "2026-07-22T00:00:00.000Z", terminalPhase: "end" },
+        toolFindings: [],
+        finalReply: {
+          text: "浏览器受策略限制，无法打开新闻页。",
+          source: "history",
+          confidence: "weak",
+        },
+        sourceStatuses: ["ok"],
+      },
+    });
+    assert.equal(next.status, "blocked");
+    assert.equal(next.statusReasonCode, "openclaw.final_reply_negative");
+    assert.match(next.blockedReason ?? "", /无法打开/);
+  });
+
+  it("wait ok 但 lifecycle error 时进入 failed 而不是 completed", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-07-22T00:00:00.000Z",
+        wait: { status: "ok", endedAt: "2026-07-22T00:00:00.000Z" },
+        lifecycle: {
+          endedAt: "2026-07-22T00:00:00.000Z",
+          terminalPhase: "error",
+          terminalReason: "browser process crashed",
+        },
+        toolFindings: [],
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+    assert.equal(next.status, "failed");
+    assert.equal(next.statusReasonCode, "openclaw.lifecycle_failed");
+    assert.match(next.blockedReason ?? "", /browser process crashed/);
+  });
+
+  it("非法 evidence observedAt 会被归一为协议可接受时间", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "not-a-date",
+        wait: { status: "ok", endedAt: "2026-07-22T00:00:00.000Z" },
+        lifecycle: { endedAt: "2026-07-22T00:00:00.000Z", terminalPhase: "end" },
+        toolFindings: [],
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+    assert.notEqual(next.statusObservedAt, "not-a-date");
+    assert.match(next.statusObservedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("wait-only timeout 保持 running，terminal timeout 进入 failed", () => {
+    const waitOnly = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "running",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-07-22T00:00:00.000Z",
+        wait: { status: "timeout", timeoutPhase: "queue" },
+        toolFindings: [],
+        sourceStatuses: ["timeout"],
+      },
+    });
+    assert.equal(waitOnly.status, "running");
+    assert.equal(waitOnly.statusReasonCode, "openclaw.wait_timeout_observing");
+
+    const terminal = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "timed_out",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-07-22T00:01:00.000Z",
+        wait: {
+          status: "timeout",
+          timeoutPhase: "terminal",
+          endedAt: "2026-07-22T00:01:00.000Z",
+        },
+        lifecycle: { endedAt: "2026-07-22T00:01:00.000Z", terminalPhase: "timeout" },
+        toolFindings: [],
+        sourceStatuses: ["timeout"],
+      },
+    });
+    assert.equal(terminal.status, "failed");
+    assert.equal(terminal.statusReasonCode, "openclaw.run_terminal_timeout");
+  });
+
+  it("audit/tool 策略阻塞证据优先于 run completed", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-07-22T00:02:00.000Z",
+        wait: { status: "ok", endedAt: "2026-07-22T00:02:00.000Z" },
+        lifecycle: { endedAt: "2026-07-22T00:02:00.000Z", terminalPhase: "end" },
+        toolFindings: [
+          {
+            toolCallId: "tool_1",
+            toolName: "browser.open",
+            status: "failed",
+            errorCode: "policy_blocked",
+            summary: "Browser launch blocked by policy",
+          },
+        ],
+        sourceStatuses: ["ok"],
+      },
+    });
+    assert.equal(next.status, "blocked");
+    assert.equal(next.statusReasonCode, "openclaw.blocked_by_tool_or_policy");
+  });
+
+  it("tool/audit 摘要进入 job 前会脱敏 token", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-07-22T00:03:00.000Z",
+        wait: { status: "ok", endedAt: "2026-07-22T00:03:00.000Z" },
+        lifecycle: { endedAt: "2026-07-22T00:03:00.000Z", terminalPhase: "end" },
+        toolFindings: [
+          {
+            toolName: "browser.open",
+            status: "failed",
+            errorCode: "policy_blocked",
+            summary: "blocked token=abcdefghijklmnop",
+          },
+        ],
+        sourceStatuses: ["ok"],
+      },
+    });
+    assert.equal(next.status, "blocked");
+    assert.match(next.blockedReason ?? "", /token=\*\*\*/);
+    assert.equal((next.blockedReason ?? "").includes("abcdefghijklmnop"), false);
+  });
 });
 
 describe("OpenClawAdapter create/read/cancel", () => {
@@ -183,6 +334,131 @@ describe("OpenClawAdapter create/read/cancel", () => {
       allowedPermissions: null as unknown as string[],
     });
     assert.equal(bad.ok, false);
+  });
+
+  it("空权限数组时失败且不创建 run", async () => {
+    const runtime = createMutableMockOpenClawRuntimeClient();
+    const adapter = new OpenClawAdapter({ runtime: runtime.client });
+    const bad = await adapter.createJob({
+      jobId: "job_empty_permissions",
+      affairId: "affair_empty_permissions",
+      goal: "x",
+      allowedPermissions: [],
+    });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) {
+      assert.equal(bad.code, "invalid_permissions");
+    }
+    const read = await adapter.readJob("job_empty_permissions", { refresh: false });
+    assert.equal(read.ok, false);
+  });
+
+  it("空字符串权限项时失败", async () => {
+    const runtime = createMutableMockOpenClawRuntimeClient();
+    const adapter = new OpenClawAdapter({ runtime: runtime.client });
+    const bad = await adapter.createJob({
+      jobId: "job_blank_permission",
+      affairId: "affair_blank_permission",
+      goal: "x",
+      allowedPermissions: [" "],
+    });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) {
+      assert.equal(bad.code, "invalid_permissions");
+    }
+  });
+
+  it("未知权限 id 时失败", async () => {
+    const runtime = createMutableMockOpenClawRuntimeClient();
+    const adapter = new OpenClawAdapter({ runtime: runtime.client });
+    const bad = await adapter.createJob({
+      jobId: "job_unknown_permission",
+      affairId: "affair_unknown_permission",
+      goal: "x",
+      allowedPermissions: ["not.a.real.permission"],
+    });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) {
+      assert.equal(bad.code, "invalid_permissions");
+    }
+  });
+
+  it("保留 runtime 结构化错误码与 retryable", async () => {
+    const runtime = createMutableMockOpenClawRuntimeClient();
+    runtime.client.createRun = async () => {
+      throw new GatewayTransportError(
+        "INVALID_REQUEST",
+        "missing scope: operator.write Bearer abcdefghijklmnop",
+        false,
+      );
+    };
+    const adapter = new OpenClawAdapter({ runtime: runtime.client });
+    const created = await adapter.createJob({
+      jobId: "job_structured_error",
+      affairId: "affair_structured_error",
+      goal: "x",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, false);
+    if (!created.ok) {
+      assert.equal(created.code, "INVALID_REQUEST");
+      assert.equal(created.retryable, false);
+      assert.equal(created.message.includes("abcdefghijklmnop"), false);
+    }
+  });
+
+  it("普通 runtime Error 返回前也会脱敏", async () => {
+    const runtime = createMutableMockOpenClawRuntimeClient();
+    runtime.client.createRun = async () => {
+      throw new Error("network failed token=abcdefghijklmnop");
+    };
+    const adapter = new OpenClawAdapter({ runtime: runtime.client });
+    const created = await adapter.createJob({
+      jobId: "job_plain_error_redaction",
+      affairId: "affair_plain_error_redaction",
+      goal: "x",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, false);
+    if (!created.ok) {
+      assert.equal(created.code, "runtime_create_failed");
+      assert.match(created.message, /token=\*\*\*/);
+      assert.equal(created.message.includes("abcdefghijklmnop"), false);
+    }
+  });
+
+  it("readJob 拒绝不属于当前 job 的 run 快照", async () => {
+    const runtime = createMutableMockOpenClawRuntimeClient();
+    const adapter = new OpenClawAdapter({ runtime: runtime.client });
+    const created = await adapter.createJob({
+      jobId: "job_identity",
+      affairId: "affair_identity",
+      goal: "x",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) {
+      return;
+    }
+    const originalRunId = created.job.openclawRunId;
+    runtime.client.getRun = async () => ({
+      runId: "run_from_other_job",
+      status: "completed",
+      summary: "wrong run",
+    });
+
+    const read = await adapter.readJob("job_identity");
+
+    assert.equal(read.ok, false);
+    if (!read.ok) {
+      assert.equal(read.code, "runtime_evidence_mismatch");
+    }
+    const cached = await adapter.readJob("job_identity", { refresh: false });
+    assert.equal(cached.ok, true);
+    if (cached.ok) {
+      assert.equal(cached.job.status, "running");
+      assert.equal(cached.job.openclawRunId, originalRunId);
+    }
   });
 
   it("completed 刷新后仍只反映 job 完成（先经 running）", async () => {

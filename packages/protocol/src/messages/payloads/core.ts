@@ -62,6 +62,8 @@ export interface JobPayload {
   executor: "openclaw";
   /** job 执行状态 */
   status: JobStatus;
+  /** job 用途；exploration 只为澄清上下文，不代表正式执行承诺 */
+  purpose?: "execution" | "exploration";
   /** 执行目标摘要 */
   goal: string;
   /** 工作区提示路径；可空，非授权本身 */
@@ -76,6 +78,10 @@ export interface JobPayload {
   resumeCondition?: string | null;
   /** 关联权限请求 */
   permissionRequestId?: string | null;
+  /** companion 对当前状态的稳定理由码；由 companion 生成，可空 */
+  statusReasonCode?: string | null;
+  /** companion 最近一次采纳状态证据的 ISO-8601 时间；由 companion 生成，可空 */
+  statusObservedAt?: string | null;
 }
 
 /**
@@ -142,6 +148,8 @@ export interface PairingCompletedPayload {
   phoneDeviceId: string;
   /** 桌面设备 id */
   desktopDeviceId: string;
+  /** 配对共享秘密；仅用于后续 session.open HMAC，不得记录日志 */
+  pairingSecret: string;
   /** 配对完成时间 */
   pairedAt: string;
 }

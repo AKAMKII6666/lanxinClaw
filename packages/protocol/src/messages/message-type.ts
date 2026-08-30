@@ -31,6 +31,7 @@ export const MESSAGE_TYPES = [
   "job.completed",
   "job.failed",
   "job.cancel",
+  "job.canceled",
   "chat.message",
   "chat.context_attach",
   "chat.read_receipt",

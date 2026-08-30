@@ -130,4 +130,72 @@ describe("job.create transaction", () => {
     socket.close();
     await server.close();
   });
+
+  it("jobId 相同但 purpose 不同必须冲突", { timeout: 10000 }, async () => {
+    const { backend, identityStore, server, socket } = await startHarness();
+    const reader = createJsonReader(socket);
+    await openSession(socket, reader, identityStore);
+
+    backend.getState().affairs.set("affair_purpose", {
+      affairId: "affair_purpose",
+      title: "purpose",
+      ownerAgent: "zhang-boss",
+      status: "running",
+      context: [],
+      acceptanceCriteria: [],
+      currentJobId: null,
+      blockedReason: null,
+      resumeCondition: null,
+    });
+    backend.getState().jobs.set("job_purpose_conflict", {
+      jobId: "job_purpose_conflict",
+      affairId: "affair_purpose",
+      executor: "openclaw",
+      status: "completed",
+      purpose: "exploration",
+      goal: "same goal",
+      workspaceHint: null,
+      allowedPermissions: ["workspace.read"],
+      progressSummary: "",
+      blockedReason: null,
+      resumeCondition: null,
+      permissionRequestId: null,
+    });
+
+    socket.send(JSON.stringify(createEnvelope({
+      source: { kind: "phone", deviceId: "phone_srv_001" },
+      target: { kind: "companion", deviceId: "desktop_srv_001" },
+      type: "job.create",
+      payload: {
+        jobId: "job_purpose_conflict",
+        affairId: "affair_purpose",
+        executor: "openclaw",
+        status: "queued",
+        purpose: "execution",
+        goal: "same goal",
+        workspaceHint: null,
+        allowedPermissions: ["workspace.read"],
+        progressSummary: "",
+        blockedReason: null,
+        resumeCondition: null,
+        permissionRequestId: null,
+      },
+    })));
+
+    let ack: { ok?: boolean; error?: { code?: string } } | undefined;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const msg = await reader.next("job.create ack");
+      if (typeof msg.ok === "boolean") {
+        ack = msg;
+        break;
+      }
+    }
+    assert.ok(ack);
+    assert.equal(ack!.ok, false);
+    assert.equal(ack!.error?.code, "job_id_conflict");
+    assert.equal(backend.getPermissionGate().hasPendingForJob("job_purpose_conflict"), false);
+
+    socket.close();
+    await server.close();
+  });
 });

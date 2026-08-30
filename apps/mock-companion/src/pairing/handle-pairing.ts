@@ -6,6 +6,7 @@
  * 副作用：更新 store；通过 emit 回推协议消息。
  */
 
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   createEnvelope,
   createProtocolError,
@@ -125,12 +126,12 @@ export function handlePairingConfirmed(
   const phoneDeviceId = pending.phoneDeviceId;
   const phoneDisplayName = pending.phoneDisplayName;
   const pairedAt = new Date().toISOString();
-  const authProof = `mock-paired:${payload.pairingId}`;
+  const pairingSecret = randomBytes(32).toString("hex");
   store.paired = {
     pairingId: payload.pairingId,
     phoneDeviceId,
     phoneDisplayName,
-    authProof,
+    pairingSecret,
     pairedAt,
   };
   store.pendingChallenge = null;
@@ -153,6 +154,7 @@ export function handlePairingConfirmed(
     pairingId: payload.pairingId,
     phoneDeviceId,
     desktopDeviceId: config.desktopDeviceId,
+    pairingSecret,
     pairedAt,
   };
   emit(
@@ -168,7 +170,7 @@ export function handlePairingConfirmed(
 }
 
 /**
- * 处理 session.open：校验 mock authProof 后接受会话。
+ * 处理 session.open：校验 pairingSecret HMAC 后接受会话。
  *
  * @param store 内存 store
  * @param config 配置
@@ -189,7 +191,7 @@ export function handleSessionOpen(
       error: createProtocolError("not_paired", "尚未完成配对", false),
     };
   }
-  if (payload.authProof !== store.paired.authProof) {
+  if (!verifySessionAuthProof(store.paired.pairingSecret, payload.sessionId, payload.authProof)) {
     return {
       ok: false,
       error: createProtocolError("auth_failed", "authProof 与配对身份不匹配", false),
@@ -222,4 +224,27 @@ export function handleSessionOpen(
     }),
   );
   return { ok: true };
+}
+
+/**
+ * @param pairingSecret 配对共享秘密
+ * @param sessionId 会话 id
+ * @param authProof 入站证明
+ * @returns 是否匹配
+ */
+function verifySessionAuthProof(pairingSecret: string, sessionId: string, authProof: string): boolean {
+  if (!pairingSecret || !sessionId || !authProof) {
+    return false;
+  }
+  const expected = createHmac("sha256", pairingSecret)
+    .update(`session.open:v1:${sessionId}`, "utf8")
+    .digest("hex");
+  if (expected.length !== authProof.length) {
+    return false;
+  }
+  try {
+    return timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(authProof, "utf8"));
+  } catch {
+    return false;
+  }
 }

@@ -51,7 +51,7 @@ export function precheckJobCreate(
     return {
       ok: false,
       code: "job_id_conflict",
-      message: "jobId 已存在但 affairId/goal/allowedPermissions 不一致",
+      message: "jobId 已存在但 affairId/goal/purpose/allowedPermissions 不一致",
       retryable: false,
     };
   }
@@ -117,9 +117,18 @@ function isEquivalentJobCreate(existing: JobPayload, incoming: JobPayload): bool
   return (
     existing.affairId === incoming.affairId &&
     existing.goal === incoming.goal &&
+    normalizePurpose(existing.purpose) === normalizePurpose(incoming.purpose) &&
     normalizePermissions(existing.allowedPermissions) ===
       normalizePermissions(incoming.allowedPermissions ?? [])
   );
+}
+
+/**
+ * @param purpose job 用途
+ * @returns 归一化用途
+ */
+function normalizePurpose(purpose: JobPayload["purpose"]): "execution" | "exploration" {
+  return purpose === "exploration" ? "exploration" : "execution";
 }
 
 /**

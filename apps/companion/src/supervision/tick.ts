@@ -69,6 +69,15 @@ function waitingAcceptanceActions(
   if (!snapshot.jobId || snapshot.jobStatus !== "completed") {
     return null;
   }
+  if (snapshot.jobPurpose === "exploration") {
+    return [
+      {
+        kind: "continue_watch",
+        affairId: snapshot.affairId,
+        note: "探索 job 已完成；仅作为澄清上下文，不进入事务验收",
+      },
+    ];
+  }
   if (affairStatusAfterJobTerminal("completed") !== "waiting_acceptance") {
     return null;
   }

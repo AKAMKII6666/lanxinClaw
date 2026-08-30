@@ -65,6 +65,7 @@ describe("raw websocket gateway transport (protocol v4)", () => {
         maxProtocol?: number;
         role?: string;
         scopes?: string[];
+        caps?: string[];
         client?: { id?: string; mode?: string };
         auth?: { token?: string };
       };
@@ -72,6 +73,7 @@ describe("raw websocket gateway transport (protocol v4)", () => {
       assert.equal(connectParams.maxProtocol, 4);
       assert.equal(connectParams.role, "operator");
       assert.deepEqual(connectParams.scopes, ["operator.read", "operator.write"]);
+      assert.deepEqual(connectParams.caps, ["tool-events"]);
       assert.equal(connectParams.client?.id, "gateway-client");
       assert.equal(connectParams.client?.mode, "backend");
       assert.equal(connectParams.auth?.token, "token-test");
@@ -126,6 +128,321 @@ describe("raw websocket gateway transport (protocol v4)", () => {
       });
       const read = await transport.getRun(created.runId);
       assert.equal(read.status, "running");
+      assert.equal(read.evidence?.wait?.status, "timeout");
+      assert.equal(read.evidence?.wait?.timeoutPhase, "queue");
+      assert.equal(read.evidence?.probeResults?.some((probe) => probe.ok === false), true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("agent 返回 in_flight 视为已接受而非非法 run", async () => {
+    const server = await startProtocolV4Server((frame) => {
+      if (frame.method === "connect") {
+        return { type: "hello-ok", protocol: 4, server: { version: "x", connId: "c" } };
+      }
+      if (frame.method === "agent") {
+        return { runId: "gw_run_in_flight", status: "in_flight", summary: "already running" };
+      }
+      throw new GatewayTransportError("gateway_test_unexpected", "unexpected", false);
+    });
+    try {
+      const transport = createRawWebSocketGatewayTransport({
+        gatewayUrl: server.url,
+        authProvider: () => "t",
+        timeoutMs: 1000,
+      });
+      const created = await transport.createRun({
+        agentId: "main",
+        idempotencyKey: "k-in-flight",
+        input: "x",
+        sessionKey: "lanxing-job:k-in-flight",
+        workspaceHint: null,
+        scopes: ["workspace.read"],
+        timeoutMs: null,
+      });
+      assert.equal(created.status, "accepted");
+      assert.equal(created.evidence?.wait?.status, "in_flight");
+      assert.deepEqual(created.evidence?.sourceStatuses, ["in_flight", "accepted"]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("agent.wait 返回 timeout 且有 endedAt 时保留终态超时证据", async () => {
+    const endedAt = "2026-07-22T00:00:00.000Z";
+    const server = await startProtocolV4Server((frame) => {
+      if (frame.method === "connect") {
+        return { type: "hello-ok", protocol: 4, server: { version: "x", connId: "c" } };
+      }
+      if (frame.method === "agent") {
+        return { runId: "gw_run_terminal_timeout", status: "accepted" };
+      }
+      if (frame.method === "agent.wait") {
+        return { runId: "gw_run_terminal_timeout", status: "timeout", endedAt };
+      }
+      throw new GatewayTransportError("gateway_test_unexpected", "unexpected", false);
+    });
+    try {
+      const transport = createRawWebSocketGatewayTransport({
+        gatewayUrl: server.url,
+        authProvider: () => "t",
+        timeoutMs: 1000,
+        getRunTimeoutMs: 200,
+      });
+      const created = await transport.createRun({
+        agentId: "main",
+        idempotencyKey: "k-terminal-timeout",
+        input: "x",
+        sessionKey: "lanxing-job:k-terminal-timeout",
+        workspaceHint: null,
+        scopes: [],
+        timeoutMs: null,
+      });
+      const read = await transport.getRun(created.runId);
+      assert.equal(read.status, "timed_out");
+      assert.equal(read.evidence?.wait?.timeoutPhase, "terminal");
+      assert.equal(read.evidence?.lifecycle?.terminalPhase, "timeout");
+      assert.deepEqual(read.evidence?.sourceStatuses, ["timeout", "timed_out"]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("agent.wait 响应体内 toolFindings 进入证据", async () => {
+    const server = await startProtocolV4Server((frame) => {
+      if (frame.method === "connect") {
+        return { type: "hello-ok", protocol: 4, features: { methods: [], events: [] }, server: { connId: "c" } };
+      }
+      if (frame.method === "agent") {
+        return { runId: "gw_run_inline_tools", status: "accepted" };
+      }
+      if (frame.method === "agent.wait") {
+        return {
+          runId: "gw_run_inline_tools",
+          status: "ok",
+          endedAt: "2026-07-22T00:00:00.000Z",
+          toolFindings: [
+            {
+              toolName: "browser.open",
+              status: "failed",
+              errorCode: "policy_blocked",
+              summary: "Browser launch blocked by policy",
+            },
+          ],
+        };
+      }
+      throw new GatewayTransportError("gateway_test_unexpected", "unexpected", false);
+    });
+    try {
+      const transport = createRawWebSocketGatewayTransport({
+        gatewayUrl: server.url,
+        authProvider: () => "t",
+        timeoutMs: 1000,
+        getRunTimeoutMs: 200,
+      });
+      const created = await transport.createRun({
+        agentId: "main",
+        idempotencyKey: "k-inline-tools",
+        input: "open news",
+        sessionKey: "lanxing-job:job_inline_tools",
+        workspaceHint: null,
+        scopes: ["desktop.control"],
+        timeoutMs: null,
+      });
+      const read = await transport.getRun(created.runId);
+      assert.equal(read.evidence?.toolFindings[0]?.status, "blocked");
+      assert.equal(read.evidence?.toolFindings[0]?.toolName, "browser.open");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("agent.wait ok 保留 history 负向最终回复证据", async () => {
+    const server = await startProtocolV4Server((frame) => {
+      if (frame.method === "connect") {
+        return {
+          type: "hello-ok",
+          protocol: 4,
+          features: { methods: ["chat.history"], events: [] },
+          server: { version: "x", connId: "c" },
+        };
+      }
+      if (frame.method === "agent") {
+        return { runId: "gw_run_history", status: "accepted" };
+      }
+      if (frame.method === "agent.wait") {
+        return {
+          runId: "gw_run_history",
+          status: "ok",
+          endedAt: "2026-07-22T00:00:00.000Z",
+        };
+      }
+      if (frame.method === "chat.history") {
+        return {
+          messages: [
+            {
+              role: "assistant",
+              text: "浏览器受策略限制，无法打开新闻页。",
+            },
+          ],
+        };
+      }
+      throw new GatewayTransportError("gateway_test_unexpected", "unexpected", false);
+    });
+    try {
+      const transport = createRawWebSocketGatewayTransport({
+        gatewayUrl: server.url,
+        authProvider: () => "t",
+        timeoutMs: 1000,
+        getRunTimeoutMs: 200,
+      });
+      const created = await transport.createRun({
+        agentId: "main",
+        idempotencyKey: "k-history",
+        input: "open news",
+        sessionKey: "lanxing-job:job_history",
+        workspaceHint: null,
+        scopes: ["desktop.control"],
+        timeoutMs: null,
+      });
+      const read = await transport.getRun(created.runId, {
+        jobId: "job_history",
+        affairId: "affair_history",
+        sessionKey: "lanxing-job:job_history",
+      });
+      assert.equal(read.status, "completed");
+      assert.equal(read.evidence?.wait?.status, "ok");
+      assert.equal(read.evidence?.jobId, "job_history");
+      assert.match(read.evidence?.finalReply?.text ?? "", /无法打开/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("audit.activity.list 证据进入 toolFindings", async () => {
+    const server = await startProtocolV4Server((frame) => {
+      if (frame.method === "connect") {
+        return {
+          type: "hello-ok",
+          protocol: 4,
+          features: { methods: ["audit.activity.list"], events: [] },
+          server: { version: "x", connId: "c" },
+        };
+      }
+      if (frame.method === "agent") {
+        return { runId: "gw_run_audit", status: "accepted" };
+      }
+      if (frame.method === "agent.wait") {
+        return {
+          runId: "gw_run_audit",
+          status: "ok",
+          endedAt: "2026-07-22T00:00:00.000Z",
+        };
+      }
+      if (frame.method === "audit.activity.list") {
+        return {
+          activities: [
+            {
+              runId: "gw_run_audit",
+              toolName: "browser.open",
+              status: "failed",
+              errorCode: "policy_blocked",
+              summary: "Browser launch blocked by policy",
+            },
+          ],
+        };
+      }
+      throw new GatewayTransportError("gateway_test_unexpected", "unexpected", false);
+    });
+    try {
+      const transport = createRawWebSocketGatewayTransport({
+        gatewayUrl: server.url,
+        authProvider: () => "t",
+        timeoutMs: 1000,
+        getRunTimeoutMs: 200,
+      });
+      const created = await transport.createRun({
+        agentId: "main",
+        idempotencyKey: "k-audit",
+        input: "open news",
+        sessionKey: "lanxing-job:job_audit",
+        workspaceHint: null,
+        scopes: ["desktop.control"],
+        timeoutMs: null,
+      });
+      const read = await transport.getRun(created.runId, {
+        jobId: "job_audit",
+        affairId: "affair_audit",
+        sessionKey: "lanxing-job:job_audit",
+      });
+      assert.equal(read.evidence?.toolFindings[0]?.status, "blocked");
+      assert.equal(read.evidence?.toolFindings[0]?.toolName, "browser.open");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("audit.activity.list 的 nested lifecycle failed 保留为 error 证据", async () => {
+    const server = await startProtocolV4Server((frame) => {
+      if (frame.method === "connect") {
+        return {
+          type: "hello-ok",
+          protocol: 4,
+          features: { methods: ["audit.activity.list"], events: [] },
+          server: { version: "x", connId: "c" },
+        };
+      }
+      if (frame.method === "agent") {
+        return { runId: "gw_run_lifecycle_failed", status: "accepted" };
+      }
+      if (frame.method === "agent.wait") {
+        return {
+          runId: "gw_run_lifecycle_failed",
+          status: "ok",
+          endedAt: "2026-07-22T00:00:00.000Z",
+        };
+      }
+      if (frame.method === "audit.activity.list") {
+        return {
+          activities: [
+            {
+              runId: "gw_run_lifecycle_failed",
+              lifecycle: {
+                status: "failed",
+                endedAt: "2026-07-22T00:00:00.000Z",
+                terminalReason: "browser process crashed",
+              },
+            },
+          ],
+        };
+      }
+      throw new GatewayTransportError("gateway_test_unexpected", "unexpected", false);
+    });
+    try {
+      const transport = createRawWebSocketGatewayTransport({
+        gatewayUrl: server.url,
+        authProvider: () => "t",
+        timeoutMs: 1000,
+        getRunTimeoutMs: 200,
+      });
+      const created = await transport.createRun({
+        agentId: "main",
+        idempotencyKey: "k-lifecycle-failed",
+        input: "open news",
+        sessionKey: "lanxing-job:job_lifecycle_failed",
+        workspaceHint: null,
+        scopes: ["desktop.control"],
+        timeoutMs: null,
+      });
+      const read = await transport.getRun(created.runId, {
+        jobId: "job_lifecycle_failed",
+        affairId: "affair_lifecycle_failed",
+        sessionKey: "lanxing-job:job_lifecycle_failed",
+      });
+      assert.equal(read.status, "completed");
+      assert.equal(read.evidence?.lifecycle?.terminalPhase, "error");
+      assert.match(read.evidence?.lifecycle?.terminalReason ?? "", /crashed/);
     } finally {
       await server.close();
     }

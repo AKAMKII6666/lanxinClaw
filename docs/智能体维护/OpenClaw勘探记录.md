@@ -10,7 +10,7 @@
 
 | 问题 | 结论 |
 |------|------|
-| 首选接入方式 | **进程外 Gateway client**：用 `@openclaw/sdk`（App SDK）连接本机 Gateway，创建/查询/取消 agent run |
+| 首选接入方式 | **进程外 Gateway client**：通过 Gateway WebSocket RPC 或官方 gateway client/protocol 包连接本机 Gateway，创建/查询/取消 agent run |
 | 备选 | Plugin SDK（`openclaw/plugin-sdk/*`）— 仅当必须挂进 OpenClaw 进程内 hook 时 |
 | 默认禁止 | 大范围改 OpenClaw core；把张老板人格、pairing、affair 关闭写进 core |
 | 本仓落点 | `packages/openclaw-adapter` 翻译 Lanxing job ↔ OpenClaw run；companion 仍是权限与配对边界 |
@@ -32,8 +32,8 @@
 | `src/sessions/`、`src/tasks/` | 会话与任务账本 |
 | `src/cli/` | `openclaw gateway` / `agent` / `tasks` / `doctor` 等命令 |
 | `src/plugins/`、`packages/plugin-sdk/` | 进程内扩展点 |
-| `packages/sdk/` | **App SDK**（`@openclaw/sdk`）：外部应用连接 Gateway |
-| `packages/gateway-client/`、`packages/gateway-protocol/` | Gateway 传输与协议 |
+| `packages/gateway-client/`、`packages/gateway-protocol/` | Gateway 传输与协议；线上文档推荐的外部 client 包 |
+| `packages/sdk/` | 历史 App SDK 入口；若本地版本缺失，不作为当前实现真源 |
 | `extensions/` | 捆绑/可选 harness 与插件（如 Codex） |
 | `config` / 用户态 `~/.openclaw/openclaw.json` | 本机配置（模型、runtime、插件） |
 
@@ -63,19 +63,22 @@
 
 ## 5. 公开扩展点（按优先级）
 
-### 5.1 App SDK / Gateway client（推荐）
+### 5.1 Gateway client / Gateway RPC（推荐）
 
-`@openclaw/sdk` 面向进程外应用，文档化表面包括：
+2026-08-29 对照官方文档和本地 `openclaw@2026.7.1-2` 后，当前推荐把 Gateway WebSocket RPC 视为稳定控制面。本仓现状采用 raw WebSocket transport；线上文档同时提供 `@openclaw/gateway-client` 和 `@openclaw/gateway-protocol` 作为外部 client 包。
 
-- `OpenClaw` 客户端：连接、传输、请求与事件（`connect` / transport）
-- `oc.agents.get(id)` → `agent.run({ input, model?, sessionKey?, timeoutMs? })`
-- `oc.runs`：可创建、查询、等待、取消与流式订阅
-- `Run.events()` / `Run.wait()` / `Run.cancel()`（取消走 `sessions.abort`）
-- `oc.sessions`、`oc.tasks`、`oc.tools`、`oc.approvals`、`oc.artifacts`
+重点入口：
 
-测试可注入假 `OpenClawTransport`，适合本仓 contract test。
+- `agent`：创建 run，使用 `idempotencyKey` 去重。
+- `agent.wait`：等待 run lifecycle，返回 `ok/error/timeout` 粗状态。
+- `chat.abort`：取消 run。
+- `audit.activity.list` / `audit.list`：读取 run/tool 结构化结果。
+- `tasks.list/get`：读取后台 task ledger。
+- `chat.history` / `chat.message.get`：读取用户可见最终回复和摘要。
 
-**注意**：当前 Gateway 对部分 per-run 覆盖字段（如 workspace / runtime / approvals override）可能尚未接线；SDK 会在提交前抛错，避免静默落到默认策略。adapter 必须把 workspace 与权限范围当作 **companion 已裁决后的显式入参**，并在真实接线时核对 SDK/Gateway 版本能力。
+测试可注入假 Gateway transport，适合本仓 contract test。
+
+**注意**：历史文档曾提到 `@openclaw/sdk` App SDK；当前外部接入实现以 Gateway RPC 为准，若未来切到官方 gateway client/protocol 包，仍必须保持本仓 `OpenClawRuntimeClient` 窄接口和状态证据语义不变。
 
 ### 5.2 Plugin SDK（次选）
 
@@ -93,13 +96,15 @@
 
 ## 6. 状态映射（OpenClaw → Lanxing job）
 
+状态映射已在 2026-08-29 重新研究，详见 [OpenClaw状态研究记录.md](OpenClaw状态研究记录.md)、[../共同维护/技术设计/OpenClaw状态观测与探针.md](../共同维护/技术设计/OpenClaw状态观测与探针.md) 和 [../共同维护/技术设计/OpenClaw到Lanxin状态映射.md](../共同维护/技术设计/OpenClaw到Lanxin状态映射.md)。下表保留为高层摘要。
+
 | OpenClaw / SDK 侧信号 | Lanxing `JobStatus` | 说明 |
 |------------------------|---------------------|------|
 | run 已接受、尚未产出终态 | `queued` → `running` | adapter 本地可先 `queued` 再刷新为 `running` |
 | `run.started` / 流式 progress | `running` | `progressSummary` 只放安全摘要 |
 | `approval.requested` | `needs_permission` | companion 弹确认；OpenClaw 不替代权限门 |
 | 工具失败且需外部输入 / 明确阻塞 | `blocked` | 填 `blockedReason` + `resumeCondition` |
-| `run.completed` | `completed` | **仅** worker 完成；affair → `waiting_acceptance` 由事务层处理 |
+| run 正常结束且无负证据 | `completed` | **仅** worker 完成；affair → `waiting_acceptance` 由事务层处理 |
 | `run.failed` / 不可恢复错误 | `failed` | |
 | `run.cancelled` / abort / `timed_out`（按产品口径） | `canceled` 或 `failed` | MVP：用户取消 → `canceled`；超时可先 `failed` 并带原因 |
 
@@ -112,7 +117,7 @@ Phone / 张老板
   -> affair / job 协议
   -> Companion（pairing + permission gate + audit）
   -> packages/openclaw-adapter（create / read / cancel）
-  -> OpenClawRuntimeClient（真实：@openclaw/sdk；测试：mock）
+  -> OpenClawRuntimeClient（真实：Gateway RPC/client；测试：mock）
   -> OpenClaw Gateway / agent run
 ```
 
@@ -135,7 +140,7 @@ MVP API（见 `packages/openclaw-adapter`）：
 
 | 风险 | 缓解 |
 |------|------|
-| `@openclaw/sdk` 版本与 Gateway RPC 演进快 | adapter 只依赖窄接口 `OpenClawRuntimeClient`；真实 client 单独实现并钉版本 |
+| Gateway RPC/client 版本演进快 | adapter 只依赖窄接口 `OpenClawRuntimeClient`；真实 client 单独实现并钉版本 |
 | per-run workspace/approval override 未接线 | MVP 用 Gateway 默认 workspace + companion 侧权限门；接线前用 mock 验契约 |
 | Channel/插件与电话协议混淆 | 文档与代码命名严格区分；电话只走本仓协议 |
 | 误改 core | 默认 PR/任务范围排除 vendored OpenClaw；勘探结论优先 SDK |

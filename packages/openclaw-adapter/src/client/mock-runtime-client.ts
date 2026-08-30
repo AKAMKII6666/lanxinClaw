@@ -8,9 +8,11 @@
 
 import type {
   CreateOpenClawRunParams,
+  OpenClawRunContext,
   OpenClawRunSnapshot,
   OpenClawRuntimeClient,
 } from "./runtime-client.js";
+import { buildExecutionEvidence } from "../evidence/openclaw-execution-evidence.js";
 import type { OpenClawRunStatus } from "../status/openclaw-run-status.js";
 
 const TERMINAL: readonly OpenClawRunStatus[] = [
@@ -70,21 +72,21 @@ export function createMutableMockOpenClawRuntimeClient(): MutableMockOpenClawRun
       return { ...snapshot };
     },
 
-    async getRun(runId: string): Promise<OpenClawRunSnapshot> {
+    async getRun(runId: string, context?: OpenClawRunContext): Promise<OpenClawRunSnapshot> {
       const found = runs.get(runId);
       if (!found) {
         throw new Error(`mock_run_not_found:${runId}`);
       }
-      return { ...found };
+      return withEvidence(found, context);
     },
 
-    async cancelRun(runId: string): Promise<OpenClawRunSnapshot> {
+    async cancelRun(runId: string, context?: OpenClawRunContext): Promise<OpenClawRunSnapshot> {
       const found = runs.get(runId);
       if (!found) {
         throw new Error(`mock_run_not_found:${runId}`);
       }
       if (TERMINAL.includes(found.status)) {
-        return { ...found };
+        return withEvidence(found, context);
       }
       const next: OpenClawRunSnapshot = {
         ...found,
@@ -92,7 +94,7 @@ export function createMutableMockOpenClawRuntimeClient(): MutableMockOpenClawRun
         summary: "cancelled_by_adapter",
       };
       runs.set(runId, next);
-      return { ...next };
+      return withEvidence(next, context, true);
     },
   };
 
@@ -115,6 +117,27 @@ export function createMutableMockOpenClawRuntimeClient(): MutableMockOpenClawRun
       }
       runs.set(input.runId, next);
     },
+  };
+}
+
+function withEvidence(
+  snapshot: OpenClawRunSnapshot,
+  context?: OpenClawRunContext,
+  localCancelAck = false,
+): OpenClawRunSnapshot {
+  return {
+    ...snapshot,
+    evidence: buildExecutionEvidence({
+      runId: snapshot.runId,
+      status: snapshot.status,
+      ...(snapshot.summary !== undefined ? { summary: snapshot.summary } : {}),
+      ...(snapshot.blockedReason !== undefined ? { blockedReason: snapshot.blockedReason } : {}),
+      ...(snapshot.resumeCondition !== undefined ? { resumeCondition: snapshot.resumeCondition } : {}),
+      ...(context?.jobId ? { jobId: context.jobId } : {}),
+      ...(context?.affairId ? { affairId: context.affairId } : {}),
+      ...(context?.sessionKey ? { sessionKey: context.sessionKey } : {}),
+      localCancelAck,
+    }),
   };
 }
 

@@ -50,6 +50,18 @@ describe("supervision tick", () => {
     );
   });
 
+  it("exploration completed 只继续观察，不进入验收", () => {
+    const actions = runSupervisionTick(
+      baseSnapshot({ jobStatus: "completed", jobPurpose: "exploration" }),
+      createSupervisionNotifyMemory(),
+    );
+    assert.equal(actions[0]?.kind, "continue_watch");
+    assert.equal(
+      actions.some((a) => a.kind === "mark_waiting_acceptance"),
+      false,
+    );
+  });
+
   it("首次 blocked 通知；同指纹抑制", () => {
     const memory = createSupervisionNotifyMemory();
     const snap = baseSnapshot({

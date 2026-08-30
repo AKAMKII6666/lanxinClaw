@@ -7,7 +7,8 @@
  */
 
 import type { OpenClawRunSnapshot } from "../../runtime-client.js";
-import type { GatewayCreateRunRequest, GatewayTransport } from "../transport.js";
+import { buildExecutionEvidence } from "../../../evidence/openclaw-execution-evidence.js";
+import type { GatewayCreateRunRequest, GatewayRunContext, GatewayTransport } from "../transport.js";
 import { GatewayTransportError } from "../transport.js";
 
 /**
@@ -48,21 +49,21 @@ export function createFakeGatewayTransport(): FakeGatewayTransport {
       return snapshot;
     },
 
-    async getRun(runId) {
+    async getRun(runId, context) {
       const found = runs.get(runId);
       if (!found) {
         throw new GatewayTransportError("gateway_run_not_found", `找不到 runId=${runId}`, false);
       }
-      return { ...found };
+      return withEvidence(found, context);
     },
 
-    async cancelRun(runId) {
+    async cancelRun(runId, context) {
       const found = runs.get(runId);
       if (!found) {
         throw new GatewayTransportError("gateway_run_not_found", `找不到 runId=${runId}`, false);
       }
       if (["completed", "failed", "cancelled", "timed_out"].includes(found.status)) {
-        return { ...found };
+        return withEvidence(found, context);
       }
       const canceled: OpenClawRunSnapshot = {
         ...found,
@@ -70,7 +71,7 @@ export function createFakeGatewayTransport(): FakeGatewayTransport {
         summary: "gateway cancelled",
       };
       runs.set(runId, canceled);
-      return canceled;
+      return withEvidence(canceled, context, true);
     },
   };
   return {
@@ -82,5 +83,26 @@ export function createFakeGatewayTransport(): FakeGatewayTransport {
       }
       runs.set(runId, { runId, ...snapshot });
     },
+  };
+}
+
+function withEvidence(
+  snapshot: OpenClawRunSnapshot,
+  context?: GatewayRunContext,
+  localCancelAck = false,
+): OpenClawRunSnapshot {
+  return {
+    ...snapshot,
+    evidence: buildExecutionEvidence({
+      runId: snapshot.runId,
+      status: snapshot.status,
+      ...(snapshot.summary !== undefined ? { summary: snapshot.summary } : {}),
+      ...(snapshot.blockedReason !== undefined ? { blockedReason: snapshot.blockedReason } : {}),
+      ...(snapshot.resumeCondition !== undefined ? { resumeCondition: snapshot.resumeCondition } : {}),
+      ...(context?.jobId ? { jobId: context.jobId } : {}),
+      ...(context?.affairId ? { affairId: context.affairId } : {}),
+      ...(context?.sessionKey ? { sessionKey: context.sessionKey } : {}),
+      localCancelAck,
+    }),
   };
 }

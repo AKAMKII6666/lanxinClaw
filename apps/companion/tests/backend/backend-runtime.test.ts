@@ -145,6 +145,33 @@ describe("companion backend runtime", () => {
     assert.match(gateway?.detail ?? "", /configured but not ready/);
   });
 
+  it("job.failed 的 statusReasonCode 进入诊断 lastError", () => {
+    const backend = createCompanionBackendRuntime();
+    const result = backend.applyProtocolEnvelope(createEnvelope({
+      source: { kind: "companion", deviceId: "desktop_diag_error" },
+      target: { kind: "phone", deviceId: "phone_diag_error" },
+      type: "job.failed",
+      payload: {
+        jobId: "job_diag_failed",
+        affairId: "affair_diag_failed",
+        executor: "openclaw",
+        status: "failed",
+        goal: "run OpenClaw",
+        workspaceHint: null,
+        allowedPermissions: ["workspace.read"],
+        progressSummary: "missing scope",
+        blockedReason: "missing scope",
+        resumeCondition: null,
+        statusReasonCode: "INVALID_REQUEST",
+        statusObservedAt: "2026-07-22T00:00:00.000Z",
+      },
+    }));
+    assert.equal(result.ok, true);
+    const report = backend.getDiagnosticReport();
+    assert.equal(report.lastError?.code, "INVALID_REQUEST");
+    assert.match(report.lastError?.message ?? "", /missing scope/);
+  });
+
   it("监督 loop：job 已完成但 affair 仍 running 时推到 waiting_acceptance，不写 closed", async () => {
     const backend = createCompanionBackendRuntime({ supervisionIntervalMs: 20 });
     try {

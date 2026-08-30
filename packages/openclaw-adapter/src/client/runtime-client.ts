@@ -7,19 +7,38 @@
  */
 
 import type { OpenClawRunStatus } from "../status/openclaw-run-status.js";
+import type { OpenClawExecutionEvidence } from "../evidence/openclaw-execution-evidence.js";
 
 /**
  * 创建 run 的入参；不得包含 API key 明文。
  */
 export interface CreateOpenClawRunParams {
+  /** Lanxin job id；仅用于证据关联 */
+  jobId?: string;
+  /** Lanxin affair id；仅用于证据关联 */
+  affairId?: string;
   /** 交给 agent 的任务描述（来自 job.goal） */
   input: string;
   /** 幂等键；真实 Gateway 直接作为 runId，重试不重复创建 */
   idempotencyKey?: string;
   /** 工作区提示；可空 */
   workspaceHint?: string | null;
+  /** companion 已裁决的 job 权限摘要；不得为空时静默丢弃 */
+  allowedPermissions?: readonly string[];
   /** 会话键；建议绑定 jobId 以便取消与诊断 */
   sessionKey?: string;
+}
+
+/**
+ * 读取/取消 run 时携带的 Lanxin 关联上下文。
+ */
+export interface OpenClawRunContext {
+  /** Lanxin job id；用于校验证据归属 */
+  jobId?: string;
+  /** Lanxin affair id；用于审计关联 */
+  affairId?: string;
+  /** OpenClaw session key；用于 history/task/cancel 对齐 */
+  sessionKey?: string | null;
 }
 
 /**
@@ -36,6 +55,8 @@ export interface OpenClawRunSnapshot {
   blockedReason?: string | null;
   /** 恢复条件；可空 */
   resumeCondition?: string | null;
+  /** 内部证据集合；公开协议只投影安全摘要与理由码 */
+  evidence?: OpenClawExecutionEvidence;
 }
 
 /**
@@ -56,7 +77,7 @@ export interface OpenClawRuntimeClient {
    * @param runId OpenClaw run id
    * @returns 快照；不存在时抛错或由实现约定
    */
-  getRun(runId: string): Promise<OpenClawRunSnapshot>;
+  getRun(runId: string, context?: OpenClawRunContext): Promise<OpenClawRunSnapshot>;
 
   /**
    * 请求取消 run；已终态应幂等成功。
@@ -64,5 +85,5 @@ export interface OpenClawRuntimeClient {
    * @param runId OpenClaw run id
    * @returns 取消后的快照
    */
-  cancelRun(runId: string): Promise<OpenClawRunSnapshot>;
+  cancelRun(runId: string, context?: OpenClawRunContext): Promise<OpenClawRunSnapshot>;
 }

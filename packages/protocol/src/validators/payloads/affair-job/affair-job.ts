@@ -10,6 +10,7 @@ import { AFFAIR_STATUSES } from "../../../states/affair-status.js";
 import { JOB_STATUSES } from "../../../states/job-status.js";
 import type { AffairPayload, JobPayload } from "../../../messages/payloads/core.js";
 import {
+  expectDateTime,
   expectEnum,
   expectNonEmptyString,
   expectObject,
@@ -37,6 +38,7 @@ const JOB_KEYS = [
   "affairId",
   "executor",
   "status",
+  "purpose",
   "goal",
   "workspaceHint",
   "allowedPermissions",
@@ -44,6 +46,8 @@ const JOB_KEYS = [
   "blockedReason",
   "resumeCondition",
   "permissionRequestId",
+  "statusReasonCode",
+  "statusObservedAt",
 ] as const;
 
 /**
@@ -66,6 +70,34 @@ function assignOptionalStringOrNull<T extends object>(
   if (checked.value !== undefined) {
     (target as Record<string, unknown>)[key] = checked.value;
   }
+  return null;
+}
+
+/**
+ * 读取可选 date-time|null 字段并写入 JobPayload。
+ *
+ * @param obj 源对象
+ * @param key 字段名
+ * @param target 目标载荷
+ * @returns 失败时返回错误；成功返回 null
+ */
+function assignOptionalDateTimeOrNull(
+  obj: Record<string, unknown>,
+  key: "statusObservedAt",
+  target: JobPayload,
+): ValidateErr | null {
+  if (!(key in obj)) {
+    return null;
+  }
+  if (obj[key] === null) {
+    target[key] = null;
+    return null;
+  }
+  const checked = expectDateTime(obj[key], key);
+  if (!checked.ok) {
+    return checked;
+  }
+  target[key] = checked.value;
   return null;
 }
 
@@ -182,6 +214,13 @@ function mergeJobOptionals(
   obj: Record<string, unknown>,
   payload: JobPayload,
 ): ValidateResult<JobPayload> {
+  if ("purpose" in obj) {
+    const purpose = expectEnum(obj.purpose, "purpose", ["execution", "exploration"] as const);
+    if (!purpose.ok) {
+      return purpose;
+    }
+    payload.purpose = purpose.value;
+  }
   if ("progressSummary" in obj) {
     if (typeof obj.progressSummary !== "string") {
       return {
@@ -195,11 +234,21 @@ function mergeJobOptionals(
     }
     payload.progressSummary = obj.progressSummary;
   }
-  for (const key of ["workspaceHint", "blockedReason", "resumeCondition", "permissionRequestId"] as const) {
+  for (const key of [
+    "workspaceHint",
+    "blockedReason",
+    "resumeCondition",
+    "permissionRequestId",
+    "statusReasonCode",
+  ] as const) {
     const err = assignOptionalStringOrNull(obj, key, payload);
     if (err) {
       return err;
     }
+  }
+  const observedAtErr = assignOptionalDateTimeOrNull(obj, "statusObservedAt", payload);
+  if (observedAtErr) {
+    return observedAtErr;
   }
   return { ok: true, value: payload };
 }

@@ -36,6 +36,7 @@ const DIRECTION_RULES: Record<MessageType, DirectionRule> = {
   "job.completed": "companion_to_phone",
   "job.failed": "companion_to_phone",
   "job.cancel": "phone_to_companion",
+  "job.canceled": "companion_to_phone",
   "chat.message": "either",
   "chat.context_attach": "companion_to_phone",
   "chat.read_receipt": "either",

@@ -184,8 +184,12 @@ function applyJob(
   if (envelope.type === "job.cancel") {
     return applyJobCancel(state, envelope, now);
   }
-  const payload = envelope.payload as unknown as JobPayload;
-  const existing = state.jobs.get(payload.jobId);
+  const incoming = envelope.payload as unknown as JobPayload;
+  const existing = state.jobs.get(incoming.jobId);
+  const payload: JobPayload =
+    existing && !incoming.purpose && existing.purpose
+      ? { ...incoming, purpose: existing.purpose }
+      : incoming;
   if (existing && !canTransitionJobStatus(existing.status, payload.status)) {
     return fail(
       "job_illegal_transition",
@@ -234,6 +238,8 @@ function applyJobCancel(
     ...existing,
     status: "canceled",
     progressSummary: existing.progressSummary || "canceled_by_phone",
+    statusReasonCode: "lanxin.phone_cancel_requested",
+    statusObservedAt: now,
   };
   state.jobs.set(payload.jobId, canceled);
   const affair = state.affairs.get(payload.affairId);
@@ -255,6 +261,9 @@ function updateAffairFromJob(
   affair: AffairPayload,
   job: JobPayload,
 ): void {
+  if (job.purpose === "exploration") {
+    return;
+  }
   const nextStatus = job.status === "completed" ? "waiting_acceptance" : job.status === "blocked" ? "blocked" : null;
   if (!nextStatus || !canTransitionAffairStatus(affair.status, nextStatus)) {
     return;

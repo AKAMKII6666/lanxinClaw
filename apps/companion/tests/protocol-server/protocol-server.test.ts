@@ -206,7 +206,7 @@ describe("companion protocol server", () => {
         type: "job.cancel",
         payload: { jobId: "job_cancel_002", affairId: "affair_cancel_002" },
       })));
-      const canceled = await reader.nextEnvelope("job.progress");
+      const canceled = await reader.nextEnvelope("job.canceled");
       assert.equal((canceled.payload as { status?: string }).status, "canceled");
       let cancelAck: { ok?: boolean } | undefined;
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -434,6 +434,33 @@ describe("companion protocol server", () => {
       assert.equal(backend.listPendingPermissionCards().length, 1);
       assert.equal(backend.getState().jobs.get("job_srv_001")?.status, "needs_permission");
       assert.equal(backend.getState().chatMessages.length, 1);
+      socket.send(JSON.stringify(createEnvelope({
+        source: { kind: "phone", deviceId: "phone_srv_001" },
+        target: { kind: "companion", deviceId: "desktop_srv_001" },
+        type: "chat.message",
+        payload: {
+          chatMessageId: "chat_srv_zhang",
+          text: "张老板补充",
+          authorKind: "zhang-boss",
+          sentAt: new Date().toISOString(),
+          affairId: "affair_srv_001",
+        },
+      })));
+      socket.send(JSON.stringify(createEnvelope({
+        source: { kind: "phone", deviceId: "phone_srv_001" },
+        target: { kind: "companion", deviceId: "desktop_srv_001" },
+        type: "chat.message",
+        payload: {
+          chatMessageId: "chat_srv_spoof",
+          text: "不能冒充 companion",
+          authorKind: "companion",
+          sentAt: new Date().toISOString(),
+          affairId: "affair_srv_001",
+        },
+      })));
+      await waitFor(() => backend.getState().chatMessages.length === 3);
+      assert.equal(backend.getState().chatMessages[1]?.authorKind, "zhang-boss");
+      assert.equal(backend.getState().chatMessages[2]?.authorKind, "user");
     } finally {
       socket.close();
       await server.close();

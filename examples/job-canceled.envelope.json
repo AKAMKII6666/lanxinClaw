@@ -1,0 +1,29 @@
+{
+  "protocolVersion": "0.1",
+  "messageId": "msg_job_canceled_001",
+  "correlationId": "msg_job_cancel_001",
+  "sentAt": "2026-07-22T00:07:00.000Z",
+  "source": {
+    "kind": "companion",
+    "deviceId": "desktop_liao_pc"
+  },
+  "target": {
+    "kind": "phone",
+    "deviceId": "phone_lanxing_001"
+  },
+  "type": "job.canceled",
+  "payload": {
+    "jobId": "job_fix_code_001",
+    "affairId": "affair_fix_code_001",
+    "executor": "openclaw",
+    "status": "canceled",
+    "goal": "Inspect and fix the selected project until tests pass.",
+    "workspaceHint": "F:/workspace/xxx",
+    "allowedPermissions": ["workspace.read", "workspace.write", "command.run"],
+    "progressSummary": "OpenClaw confirmed the run was canceled.",
+    "blockedReason": null,
+    "resumeCondition": null,
+    "statusReasonCode": "openclaw.cancel_ack",
+    "statusObservedAt": "2026-07-22T00:07:00.000Z"
+  }
+}

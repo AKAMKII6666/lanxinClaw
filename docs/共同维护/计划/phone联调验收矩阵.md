@@ -6,7 +6,7 @@
 ## 0. 前置环境
 
 - 启动自托管 gateway：onboarding 配置通过后自动拉起；或手动 `npm run dev:companion` + 完成配置门（默认千问：选地域/模型 + 粘贴 DashScope API Key，无需手填 baseUrl）。
-- phone 侧（澜星电话主仓）实现：StoredAffair 落库、8 个张老板 FC、协议 client（pairing/session/消息）、mDNS browse。
+- phone 侧（澜星电话主仓）实现：StoredAffair 落库、15 个张老板 FC、协议 client（discovery/pairing/session/消息）、mDNS browse、后台回电任务。
 - 联调网络：companion 监听 `LANXIN_PROTOCOL_HOST=0.0.0.0`，电话与电脑同一局域网；防火墙放行协议端口。
 
 ## 1. 发现与配对
@@ -14,9 +14,11 @@
 | # | 用例 | 期望 |
 |---|------|------|
 | 1.1 | phone mDNS browse 发现 companion | 广告含 `_lanxing-claw._tcp`、deviceName、pairingAvailable=true，无凭据/路径字段 |
+| 1.1a | 张老板 `discover_desktops` → `prepare_desktop_connection` | 工具输出只含 candidateId/generation/fingerprint/电脑名，不含 wsUrl/IP；用户未确认时不发 pairing |
 | 1.2 | `pairing.request` → challenge | challenge 含 nonce 与过期时间；过期后重发 request 可再次配对 |
 | 1.3 | challenge 应答错误 | 配对失败，两端回到 unpaired，不建立 session |
 | 1.4 | 双确认（phone confirmed + desktop approve） | 依次收到 desktop_approved、completed；identity 落盘 |
+| 1.4a | 用户口头确认后 `confirm_desktop_connection` | 未配对时走 pairing；已配对时只走 session.open；均不得授予 job 权限 |
 | 1.5 | 重启后重连 | 已配对身份持久化，无需重新配对；session.open 用 authProof 通过 |
 | 1.6 | revoke | 撤销后停 delegator/cancel in-flight、清 connection、旧 session 失效 `[auto: reconnect-revoke + delegator]` |
 
@@ -35,16 +37,19 @@
 | # | 用例 | 期望 |
 |---|------|------|
 | 3.1 | affair.create → update | affair 进入 store；非法状态迁移被拒（保留旧状态） |
+| 3.1a | 正式事务前 `explore_desktop` | 发 `job.create(purpose=exploration)`；只允许只读 permission；completed 不进 waiting_acceptance |
 | 3.2 | job.create → needs_permission | phone 收到 job.needs_permission；权限请求入桌面队列 `[auto: e2e]` |
 | 3.3 | 授权 allow_for_job | 自动委派 adapter → phone 收到 job.accepted `[auto: e2e]` |
 | 3.4 | worker 状态流 | progress → completed 依次推送；完成摘要无凭据 |
 | 3.5 | job.completed ≠ affair.closed | affair 只到 waiting_acceptance，绝不自动 closed `[auto: mock job-lifecycle]` |
 | 3.6 | 用户验收 | affair.close(status=closed)；取消走 status=canceled |
+| 3.6a | `accept_affair` 前置门闩 | 只有 `waiting_acceptance + execution job completed + 用户接受摘要` 才能 close |
 | 3.7 | blocked | job.blocked 含 blockedReason/resumeCondition；affair → blocked；resume 后继续 |
 | 3.8 | cancel | job.cancel → adapter 取消 → 终态幂等；needs_permission 本地 cancel 不调 adapter `[auto: protocol-server.test]` |
 | 3.9 | 幂等重放 | 同 messageId/affairId/jobId 重复事件不二次委派/二次关闭；**并发同 jobId 仅一份 pending** `[auto: job-create-transaction.test]` |
 | 3.11 | 入站 identity | 伪造 source/target deviceId → `inbound_identity_mismatch` `[auto: inbound-guard.test]` |
 | 3.10 | 真实 gateway 执行 | 自托管实例内 agent run 真实完成；断网关时失败可诊断 |
+| 3.12 | 后台监督回电 | 通话结束后 active affair 转 background；job blocked/failed/completed 生成 `lanxin_claw_callback`；fire-time 复验 stale/terminal 后不外呼 |
 
 ## 4. 权限
 

@@ -21,6 +21,7 @@ import {
   type PairingStatus,
 } from "@lanxin-claw/protocol";
 import { createPairingChallenge, verifyChallengeResponse } from "./challenge.js";
+import { createPairingSecret } from "../credentials/auth-proof.js";
 import { createEmptyPairingSession, type PairingSession } from "./session.js";
 
 /** 出站消息回调 */
@@ -30,6 +31,8 @@ export type EmitPairingEnvelope = (envelope: ProtocolEnvelope<any>) => void;
 export interface PairingHandleOk {
   /** 成功标记 */
   ok: true;
+  /** 配对完成时生成并交付给 phone 的共享秘密 */
+  pairingSecret?: string;
 }
 
 /** 配对处理失败 */
@@ -212,6 +215,7 @@ function optionalCorrelation(correlationId?: string): { correlationId?: string }
  * @param session 会话（须已 phone_confirmed）
  * @param emit 出站
  * @param correlationId 可选关联 id
+ * @param pairingSecret 可选注入共享秘密；缺省时生成新秘密
  * @returns 结果
  */
 export function approveDesktopPairing(
@@ -219,6 +223,7 @@ export function approveDesktopPairing(
   session: PairingSession,
   emit: EmitPairingEnvelope,
   correlationId?: string,
+  pairingSecret?: string,
 ): PairingHandleResult {
   if (session.status !== "phone_confirmed") {
     return {
@@ -260,11 +265,13 @@ export function approveDesktopPairing(
   session.pairedAt = approvedAt;
   session.challenge = null;
   session.expiresAt = null;
+  const secret = pairingSecret ?? createPairingSecret();
 
   const completed: PairingCompletedPayload = {
     pairingId: session.pairingId,
     phoneDeviceId: session.phoneDeviceId,
     desktopDeviceId: deps.desktopDeviceId,
+    pairingSecret: secret,
     pairedAt: approvedAt,
   };
   emit(
@@ -276,7 +283,7 @@ export function approveDesktopPairing(
       payload: completed,
     }),
   );
-  return { ok: true };
+  return { ok: true, pairingSecret: secret };
 }
 
 /**

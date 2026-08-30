@@ -46,6 +46,7 @@ export const MESSAGE_PAYLOAD_SCHEMA: Record<MessageType, SchemaFileName> = {
   "job.completed": "job.schema.json",
   "job.failed": "job.schema.json",
   "job.cancel": "job-cancel.schema.json",
+  "job.canceled": "job.schema.json",
   "chat.message": "chat.schema.json",
   "chat.context_attach": "chat.schema.json",
   "chat.read_receipt": "chat.schema.json",

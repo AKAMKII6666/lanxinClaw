@@ -13,8 +13,8 @@ import {
 } from "../src/index.js";
 
 describe("companion FC catalog", () => {
-  it("导出八个稳定 FC 名且与 catalog 一一对应", () => {
-    assert.equal(COMPANION_FC_NAMES.length, 8);
+  it("导出稳定 FC 名且与 catalog 一一对应", () => {
+    assert.equal(COMPANION_FC_NAMES.length, 15);
     assert.equal(COMPANION_FC_CATALOG.length, COMPANION_FC_NAMES.length);
     for (const name of COMPANION_FC_NAMES) {
       assert.equal(isCompanionFcName(name), true);
@@ -28,7 +28,13 @@ describe("companion FC catalog", () => {
     const localOnly = COMPANION_FC_CATALOG.filter((item) => item.localOnly);
     assert.deepEqual(
       localOnly.map((item) => item.name).sort(),
-      ["companion.fetch_pending_context", "companion.get_progress"],
+      [
+        "companion.discover_desktops",
+        "companion.fetch_pending_context",
+        "companion.get_connection_status",
+        "companion.get_progress",
+        "companion.prepare_desktop_connection",
+      ],
     );
     for (const item of COMPANION_FC_CATALOG) {
       for (const type of item.emits) {
@@ -49,7 +55,11 @@ describe("companion FC catalog", () => {
     const cancelAffair = getCompanionFcMapping("companion.cancel_affair");
     assert.ok(cancelAffair?.emits.includes("affair.close"));
     assert.equal(cancelAffair?.summary.includes("不是验收通过"), true);
+    const acceptAffair = getCompanionFcMapping("companion.accept_affair");
+    assert.ok(acceptAffair?.emits.includes("affair.close"));
+    assert.equal(acceptAffair?.summary.includes("用户明确验收"), true);
     const createJob = getCompanionFcMapping("companion.create_job");
+    assert.equal(createJob?.emits.includes("affair.create"), true);
     assert.equal(createJob?.emits.includes("affair.close"), false);
   });
 });

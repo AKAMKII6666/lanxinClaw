@@ -6,7 +6,7 @@
  * - 客户端回 `req method="connect"`，params 含 min/maxProtocol、role=operator、
  *   scopes operator.read/write、client（id 白名单 gateway-client、mode backend）与 auth.token；
  * - 创建 run：`req method="agent"`，params { message, idempotencyKey, agentId?, sessionKey?, timeout? }；
- * - 读取：`req method="agent.wait" { runId, timeoutMs? }`（只返回终态；timeout 表示仍在跑）；
+ * - 读取：`req method="agent.wait" { runId, timeoutMs? }` 后结合 audit/task/history 探针；
  * - 取消：`req method="chat.abort" { sessionKey?, runId? }`。
  *
  * 不拥有：Lanxing job store、权限裁决、affair 生命周期、凭据明文。
@@ -15,13 +15,17 @@
 
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
-import type { OpenClawRunSnapshot } from "../../runtime-client.js";
-import type { OpenClawRunStatus } from "../../../status/openclaw-run-status.js";
+import type { OpenClawRunContext, OpenClawRunSnapshot } from "../../runtime-client.js";
+import type { OpenClawGatewayCapabilities } from "../../../evidence/openclaw-execution-evidence.js";
 import {
   GatewayTransportError,
   type GatewayCreateRunRequest,
   type GatewayTransport,
 } from "../transport.js";
+import { collectSupplementalEvidence } from "./evidence/probes.js";
+import { normalizeRunSnapshot } from "./evidence/snapshot.js";
+import { readString } from "./framing/readers.js";
+import { readCapabilities } from "./session/capabilities.js";
 
 /** Gateway 协议版本 */
 const PROTOCOL_VERSION = 4;
@@ -37,26 +41,6 @@ const GATEWAY_CLIENT_MODE = "backend";
 const GATEWAY_OPERATOR_CONNECT_SCOPES = ["operator.read", "operator.write"] as const;
 /** agent.wait 单次等待毫秒（默认） */
 const DEFAULT_GET_RUN_TIMEOUT_MS = 3_000;
-
-/** 状态别名 → 规范化状态；agent.wait 的 timeout 视为仍在运行 */
-const STATUS_ALIASES: Record<string, OpenClawRunStatus> = {
-  accepted: "accepted",
-  queued: "accepted",
-  running: "running",
-  approval_required: "waiting_approval",
-  "approval.request": "waiting_approval",
-  waiting_approval: "waiting_approval",
-  blocked: "blocked",
-  completed: "completed",
-  failed: "failed",
-  error: "failed",
-  cancelled: "cancelled",
-  canceled: "cancelled",
-  aborted: "cancelled",
-  abort: "cancelled",
-  timed_out: "timed_out",
-  timeout: "running",
-};
 
 /** raw WS transport 选项 */
 export interface RawWebSocketGatewayTransportOptions {
@@ -74,6 +58,18 @@ export interface RawWebSocketGatewayTransportOptions {
   getRunTimeoutMs?: number;
 }
 
+/** raw WS transport 运行时上下文。 */
+interface RawWebSocketGatewayTransportRuntime {
+  /** 创建 transport 时传入的选项。 */
+  options: RawWebSocketGatewayTransportOptions;
+  /** runId -> sessionKey 映射；用于后续 read/cancel 关联 history/task。 */
+  runSessionKeys: Map<string, string>;
+  /** RPC/连接超时毫秒。 */
+  timeoutMs: number;
+  /** agent.wait 单次等待毫秒。 */
+  getRunTimeoutMs: number;
+}
+
 /**
  * 创建 raw WS Gateway transport。
  *
@@ -83,69 +79,105 @@ export interface RawWebSocketGatewayTransportOptions {
 export function createRawWebSocketGatewayTransport(
   options: RawWebSocketGatewayTransportOptions,
 ): GatewayTransport {
-  const runSessionKeys = new Map<string, string>();
-  const timeoutMs = options.timeoutMs ?? 10_000;
-  const getRunTimeoutMs = options.getRunTimeoutMs ?? DEFAULT_GET_RUN_TIMEOUT_MS;
-
+  const runtime: RawWebSocketGatewayTransportRuntime = {
+    options,
+    runSessionKeys: new Map<string, string>(),
+    timeoutMs: options.timeoutMs ?? 10_000,
+    getRunTimeoutMs: options.getRunTimeoutMs ?? DEFAULT_GET_RUN_TIMEOUT_MS,
+  };
   return {
-    async createRun(request) {
-      const token = await requireToken(options);
-      const ws = await openGatewayConnection(options, token, timeoutMs);
-      try {
-        const idempotencyKey = request.idempotencyKey?.trim() || `lanxing:${request.sessionKey}`;
-        const payload = await rpc(
-          ws,
-          "agent",
-          {
-            message: request.input,
-            idempotencyKey,
-            ...(request.agentId ? { agentId: request.agentId } : {}),
-            ...(request.sessionKey ? { sessionKey: request.sessionKey } : {}),
-            ...(request.timeoutMs ? { timeout: request.timeoutMs } : {}),
-          },
-          timeoutMs,
-        );
-        const runId = readString(payload, ["runId", "id"]);
-        if (!runId) {
-          throw new GatewayTransportError("gateway_invalid_run", "agent 响应缺少 runId", false);
-        }
-        runSessionKeys.set(runId, request.sessionKey);
-        return normalizeRunSnapshot(payload, "createRun");
-      } finally {
-        ws.close();
-      }
-    },
+    createRun: (request) => createGatewayRun(runtime, request),
+    getRun: (runId, context) => getGatewayRun(runtime, runId, context),
+    cancelRun: (runId, context) => cancelGatewayRun(runtime, runId, context),
+  };
+}
 
-    async getRun(runId) {
-      const token = await requireToken(options);
-      const ws = await openGatewayConnection(options, token, timeoutMs);
-      try {
-        const payload = await rpc(ws, "agent.wait", { runId, timeoutMs: getRunTimeoutMs }, timeoutMs);
-        return normalizeRunSnapshot(payload, "getRun");
-      } finally {
-        ws.close();
-      }
-    },
+async function createGatewayRun(
+  runtime: RawWebSocketGatewayTransportRuntime,
+  request: GatewayCreateRunRequest,
+): Promise<OpenClawRunSnapshot> {
+  const token = await requireToken(runtime.options);
+  const connection = await openGatewayConnection(runtime.options, token, runtime.timeoutMs);
+  const { ws } = connection;
+  try {
+    const payload = await rpc(ws, "agent", createRunParams(request), runtime.timeoutMs);
+    const runId = readString(payload, ["runId", "id"]);
+    if (!runId) {
+      throw new GatewayTransportError("gateway_invalid_run", "agent 响应缺少 runId", false);
+    }
+    runtime.runSessionKeys.set(runId, request.sessionKey);
+    return normalizeRunSnapshot(payload, "createRun", {
+      context: request,
+      capabilities: connection.capabilities,
+      sessionKey: request.sessionKey,
+    });
+  } finally {
+    ws.close();
+  }
+}
 
-    async cancelRun(runId) {
-      const token = await requireToken(options);
-      const ws = await openGatewayConnection(options, token, timeoutMs);
-      try {
-        const sessionKey = runSessionKeys.get(runId);
-        await rpc(
-          ws,
-          "chat.abort",
-          {
-            ...(sessionKey ? { sessionKey } : {}),
-            runId,
-          },
-          timeoutMs,
-        );
-        return { runId, status: "cancelled", summary: "cancelled_by_adapter" };
-      } finally {
-        ws.close();
-      }
-    },
+async function getGatewayRun(
+  runtime: RawWebSocketGatewayTransportRuntime,
+  runId: string,
+  context?: OpenClawRunContext,
+): Promise<OpenClawRunSnapshot> {
+  const token = await requireToken(runtime.options);
+  const connection = await openGatewayConnection(runtime.options, token, runtime.timeoutMs);
+  const { ws } = connection;
+  try {
+    const payload = await rpc(ws, "agent.wait", { runId, timeoutMs: runtime.getRunTimeoutMs }, runtime.timeoutMs);
+    const sessionKey = context?.sessionKey ?? runtime.runSessionKeys.get(runId) ?? null;
+    const probes = await collectSupplementalEvidence(
+      ws,
+      connection.capabilities,
+      { ...context, sessionKey, runId, timeoutMs: runtime.timeoutMs },
+      rpc,
+    );
+    return normalizeRunSnapshot(payload, "getRun", {
+      ...(context ? { context } : {}),
+      capabilities: connection.capabilities,
+      sessionKey,
+      probeEvidence: probes,
+    });
+  } finally {
+    ws.close();
+  }
+}
+
+async function cancelGatewayRun(
+  runtime: RawWebSocketGatewayTransportRuntime,
+  runId: string,
+  context?: OpenClawRunContext,
+): Promise<OpenClawRunSnapshot> {
+  const token = await requireToken(runtime.options);
+  const connection = await openGatewayConnection(runtime.options, token, runtime.timeoutMs);
+  const { ws } = connection;
+  try {
+    const sessionKey = context?.sessionKey ?? runtime.runSessionKeys.get(runId) ?? null;
+    await rpc(ws, "chat.abort", { ...(sessionKey ? { sessionKey } : {}), runId }, runtime.timeoutMs);
+    return normalizeRunSnapshot(
+      { runId, status: "cancelled", summary: "cancelled_by_adapter" },
+      "cancelRun",
+      {
+        ...(context ? { context } : {}),
+        capabilities: connection.capabilities,
+        sessionKey,
+        localCancelAck: true,
+      },
+    );
+  } finally {
+    ws.close();
+  }
+}
+
+function createRunParams(request: GatewayCreateRunRequest): Record<string, unknown> {
+  const idempotencyKey = request.idempotencyKey?.trim() || `lanxing:${request.sessionKey}`;
+  return {
+    message: request.input,
+    idempotencyKey,
+    ...(request.agentId ? { agentId: request.agentId } : {}),
+    ...(request.sessionKey ? { sessionKey: request.sessionKey } : {}),
+    ...(request.timeoutMs ? { timeout: request.timeoutMs } : {}),
   };
 }
 
@@ -177,7 +209,7 @@ async function openGatewayConnection(
   options: RawWebSocketGatewayTransportOptions,
   token: string,
   timeoutMs: number,
-): Promise<WebSocket> {
+): Promise<{ ws: WebSocket; capabilities: OpenClawGatewayCapabilities }> {
   const ws = new WebSocket(options.gatewayUrl);
   // 常驻消息队列：ws 在 open 事件前到达的消息没有监听者会丢失，
   // 因此先挂队列收集，open 后再按需取用。
@@ -202,6 +234,7 @@ async function openGatewayConnection(
         maxProtocol: PROTOCOL_VERSION,
         role: "operator",
         scopes: [...GATEWAY_OPERATOR_CONNECT_SCOPES],
+        caps: ["tool-events"],
         client: {
           id: GATEWAY_CLIENT_ID,
           displayName: options.clientName ?? "Lanxing Claw",
@@ -220,7 +253,7 @@ async function openGatewayConnection(
         false,
       );
     }
-    return ws;
+    return { ws, capabilities: readCapabilities(result) };
   } catch (err) {
     ws.close();
     throw err;
@@ -418,79 +451,6 @@ function errorFromFrame(frame: Record<string, unknown>): GatewayTransportError {
     );
   }
   return new GatewayTransportError("gateway_rpc_failed", "Gateway RPC 失败", false);
-}
-
-/**
- * 规范化 Gateway run 快照。
- *
- * @param value 原始载荷
- * @param operation 操作名（错误信息用）
- * @returns 快照
- */
-function normalizeRunSnapshot(value: unknown, operation: string): OpenClawRunSnapshot {
-  if (!value || typeof value !== "object") {
-    throw new GatewayTransportError("gateway_invalid_run", `${operation} 返回值不是 run 对象`, false);
-  }
-  const raw = value as Record<string, unknown>;
-  const runId = readString(raw, ["runId", "id"]);
-  const status = normalizeStatus(readString(raw, ["status", "state"]));
-  const rawError = raw.error;
-  if (!runId) {
-    throw new GatewayTransportError("gateway_invalid_run", `${operation} 返回值缺少 runId`, false);
-  }
-  if (!status) {
-    if (rawError && typeof rawError === "object") {
-      const message = readString(rawError as Record<string, unknown>, ["message"]);
-      return { runId, status: "failed", summary: message ?? "run_failed" };
-    }
-    throw new GatewayTransportError("gateway_invalid_run", `${operation} 返回值缺少 status`, false);
-  }
-  const snapshot: OpenClawRunSnapshot = { runId, status };
-  const summary = readString(raw, ["summary", "progressSummary"]);
-  if (summary) {
-    snapshot.summary = summary;
-  }
-  if (rawError && typeof rawError === "object") {
-    const error = rawError as Record<string, unknown>;
-    const message = readString(error, ["message"]);
-    if (message) {
-      snapshot.summary = message;
-      snapshot.blockedReason = snapshot.blockedReason ?? message;
-    }
-    if (status === "accepted" || status === "running") {
-      snapshot.status = "failed";
-    }
-  }
-  return snapshot;
-}
-
-/**
- * 读取字符串字段。
- *
- * @param raw 对象
- * @param keys 候选键
- * @returns 值或 null
- */
-function readString(raw: Record<string, unknown>, keys: readonly string[]): string | null {
-  for (const key of keys) {
-    if (typeof raw[key] === "string" && raw[key].trim()) {
-      return raw[key] as string;
-    }
-  }
-  return null;
-}
-
-/**
- * 归一 Gateway 状态。
- *
- * @param value 原始状态
- * @returns 规范化状态或 null
- */
-function normalizeStatus(value: string | null): OpenClawRunStatus | null {
-  if (!value) {
-    return null;
-  }
-  return STATUS_ALIASES[value.toLowerCase()] ?? null;
 }
 
 /**

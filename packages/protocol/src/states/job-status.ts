@@ -21,7 +21,7 @@ export const JOB_STATUSES = [
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
 const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
-  queued: ["running", "needs_permission", "canceled"],
+  queued: ["running", "needs_permission", "completed", "canceled"],
   running: ["needs_permission", "blocked", "completed", "failed", "canceled"],
   needs_permission: ["running", "blocked", "failed", "canceled"],
   blocked: ["running", "failed", "canceled"],

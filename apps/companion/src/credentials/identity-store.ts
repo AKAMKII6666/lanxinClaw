@@ -42,6 +42,8 @@ export interface SavePairedIdentityInput {
   desktopDeviceId: string;
   /** 桌面展示名 */
   desktopDisplayName: string;
+  /** 已交付给 phone 的配对共享秘密；缺省时由 store 生成 */
+  pairingSecret?: string;
   /** 配对完成时间 ISO-8601 */
   pairedAt: string;
 }
@@ -115,7 +117,7 @@ export function createDeviceIdentityStore(persistence: IdentityPersistence): Dev
         phoneDisplayName: input.phoneDisplayName,
         desktopDeviceId: input.desktopDeviceId,
         desktopDisplayName: input.desktopDisplayName,
-        pairingSecret: createPairingSecret(),
+        pairingSecret: input.pairingSecret ?? createPairingSecret(),
         lifecycle: "active",
         pairedAt: input.pairedAt,
         revokedAt: null,

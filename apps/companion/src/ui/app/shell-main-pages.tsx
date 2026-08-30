@@ -18,17 +18,25 @@ import { TasksPage } from "../pages/tasks/tasks-page.js";
 import { ZhangBossPage } from "../pages/zhang-boss/zhang-boss-page.js";
 
 /**
- * @param props 当前页与 bridge
+ * @param props 当前页、bridge 与总览快捷操作回调
  * @returns 主内容 JSX
  */
 export function ShellMainPages(props: {
   page: BridgeNavPage;
   bridge: RendererBridgeApi;
+  onNavigate: (page: BridgeNavPage) => void;
+  onOpenPairing: () => void;
 }): ReactElement {
   return (
     <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
       <Toolbar />
-      {props.page === "overview" ? <OverviewPage bridge={props.bridge} /> : null}
+      {props.page === "overview" ? (
+        <OverviewPage
+          bridge={props.bridge}
+          onNavigate={props.onNavigate}
+          onOpenPairing={props.onOpenPairing}
+        />
+      ) : null}
       {props.page === "tasks" ? <TasksPage bridge={props.bridge} /> : null}
       {props.page === "zhang-boss" ? <ZhangBossPage bridge={props.bridge} /> : null}
       {props.page === "permissions" ? <PermissionsPage bridge={props.bridge} /> : null}

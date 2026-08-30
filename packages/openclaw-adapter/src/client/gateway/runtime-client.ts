@@ -64,32 +64,35 @@ export function createGatewayRuntimeClient(
 
   return {
     async createRun(params) {
-      validateGatewayOptions(gatewayUrl, agentId, scopes);
+      const runScopes = effectiveRunScopes(params.allowedPermissions, scopes);
+      validateGatewayOptions(gatewayUrl, agentId, runScopes);
       await assertAuthAvailable(options.authProvider);
       const sessionKey = params.sessionKey?.trim() || "lanxing-job:unknown";
       return sanitizeSnapshot(
         await transport.createRun({
           agentId,
+          ...(params.jobId ? { jobId: params.jobId } : {}),
+          ...(params.affairId ? { affairId: params.affairId } : {}),
           idempotencyKey: params.idempotencyKey ?? null,
           input: params.input,
           sessionKey,
           workspaceHint: params.workspaceHint ?? null,
-          scopes,
+          scopes: runScopes,
           timeoutMs: options.timeoutMs ?? null,
         }),
       );
     },
 
-    async getRun(runId) {
+    async getRun(runId, context) {
       validateGatewayOptions(gatewayUrl, agentId, scopes);
       await assertAuthAvailable(options.authProvider);
-      return sanitizeSnapshot(await transport.getRun(runId));
+      return sanitizeSnapshot(await transport.getRun(runId, context));
     },
 
-    async cancelRun(runId) {
+    async cancelRun(runId, context) {
       validateGatewayOptions(gatewayUrl, agentId, scopes);
       await assertAuthAvailable(options.authProvider);
-      return sanitizeSnapshot(await transport.cancelRun(runId));
+      return sanitizeSnapshot(await transport.cancelRun(runId, context));
     },
   };
 }
@@ -111,6 +114,13 @@ function validateGatewayOptions(gatewayUrl: string, agentId: string, scopes: rea
   if (scopes.length === 0) {
     throw new Error("gateway_scope_missing");
   }
+}
+
+function effectiveRunScopes(
+  jobPermissions: readonly string[] | undefined,
+  defaultScopes: readonly string[],
+): string[] {
+  return jobPermissions?.length ? [...jobPermissions] : [...defaultScopes];
 }
 
 /**
@@ -141,5 +151,6 @@ function sanitizeSnapshot(snapshot: OpenClawRunSnapshot): OpenClawRunSnapshot {
     ...(snapshot.summary !== undefined ? { summary: snapshot.summary } : {}),
     ...(snapshot.blockedReason !== undefined ? { blockedReason: snapshot.blockedReason } : {}),
     ...(snapshot.resumeCondition !== undefined ? { resumeCondition: snapshot.resumeCondition } : {}),
+    ...(snapshot.evidence !== undefined ? { evidence: snapshot.evidence } : {}),
   };
 }

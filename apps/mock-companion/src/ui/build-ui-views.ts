@@ -78,7 +78,7 @@ function buildCurrentAffairBlock(
     status: affair.status,
     currentJobId: affair.currentJobId ?? null,
     executor: job?.executor ?? null,
-    progressSummary: job?.progressSummary ?? null,
+    progressSummary: job?.progressSummary ?? "",
     blockedReason: affair.blockedReason ?? null,
     resumeCondition: affair.resumeCondition ?? null,
     updatedAt: now,

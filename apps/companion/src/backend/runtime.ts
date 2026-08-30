@@ -163,6 +163,7 @@ export function createCompanionBackendRuntime(
       affairStatus: affair.status as SupervisionSnapshot["affairStatus"],
       jobId: job?.jobId ?? affair.currentJobId ?? null,
       jobStatus: (job?.status as SupervisionSnapshot["jobStatus"]) ?? null,
+      jobPurpose: job?.purpose ?? "execution",
       progressSummary: job?.progressSummary ?? "",
       attemptedSteps: [],
       blockedReason: affair.blockedReason ?? job?.blockedReason ?? null,
@@ -216,9 +217,13 @@ export function createCompanionBackendRuntime(
       if (result.ok && !result.duplicate) {
         appendAuditForEnvelope(auditStore, envelope);
         if (envelope.type === "job.blocked" || envelope.type === "job.failed") {
-          const payload = envelope.payload as { affairId?: string; jobId?: string };
+          const payload = envelope.payload as {
+            affairId?: string;
+            jobId?: string;
+            statusReasonCode?: string | null;
+          };
           state.lastError = {
-            code: envelope.type,
+            code: payload.statusReasonCode ?? envelope.type,
             message: (envelope.payload as { blockedReason?: string; progressSummary?: string }).blockedReason
               ?? envelope.type,
             occurredAt: new Date().toISOString(),

@@ -105,7 +105,7 @@
     },
     "pairingCompleted": {
       "type": "object",
-      "required": ["pairingId", "phoneDeviceId", "desktopDeviceId", "pairedAt"],
+      "required": ["pairingId", "phoneDeviceId", "desktopDeviceId", "pairingSecret", "pairedAt"],
       "properties": {
         "pairingId": {
           "type": "string",
@@ -116,6 +116,10 @@
           "minLength": 1
         },
         "desktopDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pairingSecret": {
           "type": "string",
           "minLength": 1
         },

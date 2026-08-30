@@ -120,6 +120,26 @@ describe("gateway runtime client contract", () => {
     }
   });
 
+  it("createRun 优先使用 job 级 allowedPermissions 作为 scope 摘要", async () => {
+    const fake = createFakeGatewayTransport();
+    const runtime = createGatewayRuntimeClient({
+      gatewayUrl: "ws://127.0.0.1:18789",
+      agentId: "main",
+      defaultScopes: ["workspace.read", "command.run"],
+      authProvider: () => "test-token",
+      transport: fake.transport,
+    });
+    const adapter = new OpenClawAdapter({ runtime });
+    const created = await adapter.createJob({
+      jobId: "job_gateway_scope_001",
+      affairId: "affair_gateway_scope_001",
+      goal: "Gateway scope boundary",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, true);
+    assert.deepEqual(fake.createdRequests[0]?.scopes, ["workspace.read"]);
+  });
+
   it("未注入 transport 时默认 raw WS，失败也不回退 mock", async () => {
     const runtime = createGatewayRuntimeClient({
       gatewayUrl: "ws://127.0.0.1:18789",

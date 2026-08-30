@@ -226,7 +226,7 @@ export function validatePairingCompletedPayload(
   }
   const keys = rejectUnknownKeys(
     obj.value,
-    ["pairingId", "phoneDeviceId", "desktopDeviceId", "pairedAt"],
+    ["pairingId", "phoneDeviceId", "desktopDeviceId", "pairingSecret", "pairedAt"],
     "pairing.completed",
   );
   if (!keys.ok) {
@@ -244,6 +244,10 @@ export function validatePairingCompletedPayload(
   if (!desktopDeviceId.ok) {
     return desktopDeviceId;
   }
+  const pairingSecret = expectNonEmptyString(obj.value.pairingSecret, "pairingSecret");
+  if (!pairingSecret.ok) {
+    return pairingSecret;
+  }
   const pairedAt = expectDateTime(obj.value.pairedAt, "pairedAt");
   if (!pairedAt.ok) {
     return pairedAt;
@@ -254,6 +258,7 @@ export function validatePairingCompletedPayload(
       pairingId: pairingId.value,
       phoneDeviceId: phoneDeviceId.value,
       desktopDeviceId: desktopDeviceId.value,
+      pairingSecret: pairingSecret.value,
       pairedAt: pairedAt.value,
     },
   };
@@ -309,4 +314,3 @@ export function validatePairingRevokedPayload(value: unknown): ValidateResult<Pa
   }
   return { ok: true, value: payload };
 }
-

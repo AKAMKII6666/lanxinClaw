@@ -128,12 +128,17 @@ export async function approvePendingPairing(
   if (!result.ok) {
     throw new Error(result.error.message);
   }
+  const pairingSecret = result.pairingSecret;
+  if (!pairingSecret) {
+    throw new Error("pairing_secret_missing");
+  }
   await options.identityStore.savePairedIdentity({
     pairingId: pending.pairingId,
     phoneDeviceId: pending.phoneDeviceId,
     phoneDisplayName: pending.phoneDisplayName,
     desktopDeviceId: pending.desktopDeviceId,
     desktopDisplayName: pending.desktopDisplayName,
+    pairingSecret,
     pairedAt: pending.pairedAt ?? new Date().toISOString(),
   });
 }
@@ -264,9 +269,11 @@ function applyToBackend(
 ): void {
   let normalized = envelope;
   if (envelope.type === "chat.message" && envelope.source.kind === "phone") {
+    const payload = envelope.payload as { authorKind?: unknown };
+    const authorKind = payload.authorKind === "zhang-boss" ? "zhang-boss" : "user";
     normalized = {
       ...envelope,
-      payload: { ...envelope.payload as object, authorKind: "user" },
+      payload: { ...envelope.payload as object, authorKind },
     } as ProtocolEnvelope;
   }
   const applied = options.backend.applyProtocolEnvelope(normalized);

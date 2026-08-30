@@ -59,6 +59,16 @@ function filterKnownPermissions(items: readonly string[]): string[] {
 }
 
 /**
+ * exploration job 只用于对话澄清期探测，不推进 affair 生命周期。
+ *
+ * @param job job 载荷
+ * @returns 是否为探索 job
+ */
+function isExplorationJob(job: JobPayload): boolean {
+  return job.purpose === "exploration";
+}
+
+/**
  * 出站 permission.request、job.needs_permission。
  *
  * @param store store
@@ -224,11 +234,13 @@ export function handleJobCreate(
     expiresAt: null,
   });
 
-  let nextAffair = { ...affair, currentJobId: needsPermission.jobId };
-  if (canTransitionAffairStatus(nextAffair.status, "delegated")) {
-    nextAffair = { ...nextAffair, status: "delegated" };
+  if (!isExplorationJob(needsPermission)) {
+    let nextAffair = { ...affair, currentJobId: needsPermission.jobId };
+    if (canTransitionAffairStatus(nextAffair.status, "delegated")) {
+      nextAffair = { ...nextAffair, status: "delegated" };
+    }
+    store.affairs.set(nextAffair.affairId, nextAffair);
   }
-  store.affairs.set(nextAffair.affairId, nextAffair);
   emitJobCreateOutbound(store, config, inbound, needsPermission, allowed, emit);
   return { ok: true };
 }

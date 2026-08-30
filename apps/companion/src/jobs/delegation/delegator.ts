@@ -7,65 +7,30 @@
  * 副作用：调用 adapter（可能网络 I/O）、定时轮询、经 apply/send 更新 backend 与 phone。
  */
 
-import {
-  createEnvelope,
-  type AffairPayload,
-  type JobPayload,
-  type JobStatus,
-  type PermissionId,
-  type ProtocolEnvelope,
-} from "@lanxin-claw/protocol";
-import { OpenClawAdapter } from "@lanxin-claw/openclaw-adapter";
-import type { Logger } from "pino";
-import type { PermissionGate } from "../../permissions/gate/permission-gate.js";
-import type { ApplyProtocolResult } from "../../state/types.js";
+import { type JobStatus, type PermissionId, type ProtocolEnvelope } from "@lanxin-claw/protocol";
+import type { AdapterJobRecord } from "@lanxin-claw/openclaw-adapter";
 import { resolveAuthorizedWorkspaceRoot } from "../workspace-scope.js";
-import { statusToEnvelopeType, toJobPayload } from "./delegator-payload.js";
+import { statusToEnvelopeType } from "./delegator-payload.js";
+import {
+  buildAffairUpdateEnvelope,
+  buildDelegationFailureJob,
+  buildJobEnvelope,
+  buildRuntimeReadFailureJob,
+  type DelegationFailureContext,
+  type DelegatorJobProjection,
+} from "./projection/delegator-outbound.js";
+import { failureContextForRequest, outboundIdentityFromDeps } from "./delegator-context.js";
+import { jobStatusFingerprint } from "./projection/job-status-fingerprint.js";
+import {
+  DEFAULT_JOB_POLL_INTERVAL_MS,
+  IN_FLIGHT_PLACEHOLDER,
+  POLL_STOP_JOB_STATUSES,
+  type ActivePoll,
+  type JobDelegatorDeps,
+} from "./delegator-types.js";
 
-/** 默认轮询间隔毫秒 */
-export const DEFAULT_JOB_POLL_INTERVAL_MS = 2_000;
-
-/** 终态：停止轮询 */
-const TERMINAL_JOB_STATUSES: readonly JobStatus[] = ["completed", "failed", "canceled"];
-
-/** in-flight 占位（createJob 完成前） */
-const IN_FLIGHT_PLACEHOLDER = Symbol("in_flight");
-
-/** 委派器依赖 */
-export interface JobDelegatorDeps {
-  /** 已注入 runtime 的 adapter */
-  adapter: OpenClawAdapter;
-  /** 桌面授权权威 */
-  gate: PermissionGate;
-  /** 读协议侧 job 当前状态（backend state） */
-  getJobStatus: (jobId: string) => string | undefined;
-  /** 读 job 的 workspaceHint，用于授权根校验 */
-  getWorkspaceHint?: (jobId: string) => string | null | undefined;
-  /** 桌面授权工作区根；越界拒绝委派 */
-  authorizedDesktopRoot?: string | null;
-  /** 读 affair 当前状态（backend state；投影广播用） */
-  getAffair?: (affairId: string) => AffairPayload | undefined;
-  /** 已配对电话设备 id（outbound target）；无配对时跳过 WS send */
-  getPhoneDeviceId: () => string | null;
-  /** 桌面设备 id（outbound source） */
-  desktopDeviceId: string;
-  /** apply 到 backend */
-  applyProtocolEnvelope: (envelope: ProtocolEnvelope<any>) => ApplyProtocolResult;
-  /** 仅 WS 发送（backend 已 apply） */
-  sendEnvelope: (envelope: ProtocolEnvelope<any>) => void;
-  /** 轮询间隔毫秒；默认 2000 */
-  pollIntervalMs?: number;
-  /** 日志；可选 */
-  logger?: Logger;
-}
-
-/** 活跃轮询项 */
-interface ActivePoll {
-  /** 上次已广播状态 */
-  lastStatus: JobStatus;
-  /** 轮询定时器 */
-  timer: NodeJS.Timeout;
-}
+export { DEFAULT_JOB_POLL_INTERVAL_MS };
+export type { JobDelegatorDeps } from "./delegator-types.js";
 
 /**
  * Job 委派器实例。
@@ -95,6 +60,7 @@ export class JobDelegator {
     }
     const jobId = request.jobId;
     const affairId = request.affairId ?? "";
+    const failureContext = failureContextForRequest(this.deps, request);
     if (this.active.has(jobId)) {
       this.deps.logger?.debug({ jobId }, "job 已在委派/轮询中，忽略重复决策");
       return;
@@ -105,7 +71,13 @@ export class JobDelegator {
     }
     if (request.requestedPermissions.length === 0) {
       this.deps.logger?.warn({ jobId }, "空权限列表，拒绝委派");
-      this.broadcastJobFailure(jobId, affairId, "job 缺少 allowedPermissions，不得委派");
+      this.broadcastJobFailure(
+        jobId,
+        affairId,
+        "job 缺少 allowedPermissions，不得委派",
+        "lanxin.empty_permissions",
+        failureContext,
+      );
       return;
     }
     const ungranted = request.requestedPermissions.find(
@@ -113,7 +85,13 @@ export class JobDelegator {
     );
     if (ungranted) {
       this.deps.logger?.warn({ jobId, permissionId: ungranted }, "权限未授予，拒绝委派");
-      this.broadcastJobFailure(jobId, affairId, `权限 ${ungranted} 未有效授予`);
+      this.broadcastJobFailure(
+        jobId,
+        affairId,
+        `权限 ${ungranted} 未有效授予`,
+        "lanxin.permission_not_granted",
+        failureContext,
+      );
       return;
     }
     const scoped = resolveAuthorizedWorkspaceRoot(
@@ -123,7 +101,7 @@ export class JobDelegator {
     );
     if (!scoped.ok) {
       this.deps.logger?.warn({ jobId, code: scoped.code }, "工作区越界，拒绝委派");
-      this.broadcastJobFailure(jobId, affairId, scoped.message);
+      this.broadcastJobFailure(jobId, affairId, scoped.message, scoped.code, failureContext);
       return;
     }
 
@@ -133,13 +111,20 @@ export class JobDelegator {
       jobId,
       affairId,
       goal: request.reason,
+      purpose: this.deps.getJobPurpose?.(jobId) ?? "execution",
       workspaceHint: scoped.workspaceRoot,
       allowedPermissions: [...request.requestedPermissions],
     });
     if (!created.ok) {
       this.active.delete(jobId);
       this.deps.logger?.warn({ jobId, code: created.code }, "adapter 委派失败");
-      this.broadcastJobFailure(jobId, affairId, created.message);
+      this.broadcastJobFailure(
+        jobId,
+        affairId,
+        created.message,
+        created.code,
+        failureContextForRequest(this.deps, request, scoped.workspaceRoot),
+      );
       return;
     }
 
@@ -147,9 +132,14 @@ export class JobDelegator {
       this.deps.gate.isGranted(jobId, permissionId as PermissionId);
     }
 
-    this.broadcastJobAccepted(created.job, created.job.status);
+    this.broadcastJobAfterCreate(created.job);
     this.projectAffair(created.job.affairId);
-    const poll = this.startPolling(jobId, created.job.status);
+    if (POLL_STOP_JOB_STATUSES.includes(created.job.status)) {
+      this.active.delete(jobId);
+      this.deps.logger?.info({ jobId, runId: created.job.openclawRunId }, "job 已委派 OpenClaw 并进入停止轮询状态");
+      return;
+    }
+    const poll = this.startPolling(jobId, created.job);
     this.active.set(jobId, poll);
     this.deps.logger?.info({ jobId, runId: created.job.openclawRunId }, "job 已委派 OpenClaw");
   }
@@ -170,7 +160,13 @@ export class JobDelegator {
     if (this.deps.getJobStatus(jobId) !== "needs_permission") {
       return;
     }
-    this.broadcastJobFailure(jobId, affairId, reason.trim() || "permission_denied");
+    this.broadcastJobFailure(
+      jobId,
+      affairId,
+      reason.trim() || "permission_denied",
+      "lanxin.permission_denied",
+      failureContextForRequest(this.deps, request),
+    );
   }
 
   /**
@@ -184,14 +180,19 @@ export class JobDelegator {
         continue;
       }
       const status = this.deps.getJobStatus(jobId);
-      if (status !== "queued" && status !== "running" && status !== "blocked") {
+      if (status !== "queued" && status !== "running") {
         continue;
       }
       const read = await this.deps.adapter.readJob(jobId, { refresh: true });
       if (!read.ok) {
         continue;
       }
-      const poll = this.startPolling(jobId, read.job.status);
+      this.broadcastJobStatus(read.job.status, read.job);
+      this.projectAffair(read.job.affairId);
+      if (POLL_STOP_JOB_STATUSES.includes(read.job.status)) {
+        continue;
+      }
+      const poll = this.startPolling(jobId, read.job);
       this.active.set(jobId, poll);
       this.deps.logger?.info({ jobId, status: read.job.status }, "已恢复 job 轮询");
     }
@@ -214,9 +215,12 @@ export class JobDelegator {
     if (!read.ok) {
       return;
     }
-    this.broadcastJobAccepted(read.job, read.job.status);
+    this.broadcastJobAfterCreate(read.job);
     this.projectAffair(affairId);
-    const poll = this.startPolling(jobId, read.job.status);
+    if (POLL_STOP_JOB_STATUSES.includes(read.job.status)) {
+      return;
+    }
+    const poll = this.startPolling(jobId, read.job);
     this.active.set(jobId, poll);
     this.deps.logger?.info({ jobId, status: read.job.status }, "reconcile：恢复 adapter run 轮询");
   }
@@ -238,7 +242,7 @@ export class JobDelegator {
    *
    * @param next 新 adapter
    */
-  setAdapter(next: OpenClawAdapter): void {
+  setAdapter(next: JobDelegatorDeps["adapter"]): void {
     this.deps.adapter = next;
   }
 
@@ -254,7 +258,7 @@ export class JobDelegator {
       this.deps.logger?.warn({ jobId: input.jobId, code: result.code }, "adapter 取消失败");
       throw new Error(result.message);
     }
-    this.broadcastJobStatus(input.jobId, result.job.status, result.job);
+    this.broadcastJobStatus(result.job.status, result.job);
     this.stopPolling(input.jobId);
     this.projectAffair(input.affairId);
     this.deps.logger?.info({ jobId: input.jobId, status: result.job.status }, "job 已取消");
@@ -282,14 +286,19 @@ export class JobDelegator {
    * 启动 job 轮询。
    *
    * @param jobId job id
-   * @param initialStatus 初始状态
+   * @param initialJob 初始 job
    * @returns 轮询项
    */
-  private startPolling(jobId: string, initialStatus: JobStatus): ActivePoll {
+  private startPolling(jobId: string, initialJob: AdapterJobRecord): ActivePoll {
     const timer = setInterval(() => {
       void this.pollJob(jobId);
     }, this.deps.pollIntervalMs ?? DEFAULT_JOB_POLL_INTERVAL_MS);
-    return { lastStatus: initialStatus, timer };
+    return {
+      lastFingerprint: jobStatusFingerprint(initialJob),
+      lastJob: initialJob,
+      inFlight: false,
+      timer,
+    };
   }
 
   /**
@@ -303,22 +312,38 @@ export class JobDelegator {
     if (!poll || poll === IN_FLIGHT_PLACEHOLDER) {
       return;
     }
-    const read = await this.deps.adapter.readJob(jobId, { refresh: true });
-    if (!read.ok) {
-      this.deps.logger?.warn({ jobId, code: read.code }, "adapter 读取失败");
-      if (!read.retryable) {
+    if (poll.inFlight) {
+      return;
+    }
+    poll.inFlight = true;
+    try {
+      const read = await this.deps.adapter.readJob(jobId, { refresh: true });
+      if (this.active.get(jobId) !== poll) {
+        return;
+      }
+      if (!read.ok) {
+        this.deps.logger?.warn({ jobId, code: read.code }, "adapter 读取失败");
+        if (!read.retryable) {
+          const failedJob = buildRuntimeReadFailureJob(poll.lastJob, read.message, read.code);
+          this.broadcastJobStatus("failed", failedJob);
+          this.projectAffair(failedJob.affairId);
+          this.stopPolling(jobId);
+        }
+        return;
+      }
+      const nextFingerprint = jobStatusFingerprint(read.job);
+      poll.lastJob = read.job;
+      if (nextFingerprint === poll.lastFingerprint) {
+        return;
+      }
+      this.broadcastJobStatus(read.job.status, read.job);
+      poll.lastFingerprint = nextFingerprint;
+      this.projectAffair(read.job.affairId);
+      if (POLL_STOP_JOB_STATUSES.includes(read.job.status)) {
         this.stopPolling(jobId);
       }
-      return;
-    }
-    if (read.job.status === poll.lastStatus) {
-      return;
-    }
-    this.broadcastJobStatus(read.job.jobId, read.job.status, read.job);
-    poll.lastStatus = read.job.status;
-    this.projectAffair(read.job.affairId);
-    if (TERMINAL_JOB_STATUSES.includes(read.job.status)) {
-      this.stopPolling(jobId);
+    } finally {
+      poll.inFlight = false;
     }
   }
 
@@ -352,30 +377,34 @@ export class JobDelegator {
   }
 
   /**
+   * create/reconcile 后按当前 job 状态选择正确 envelope。
+   *
+   * @param job adapter job 快照
+   */
+  private broadcastJobAfterCreate(job: AdapterJobRecord): void {
+    if (job.status === "queued" || job.status === "running") {
+      this.broadcastJobAccepted(job, job.status);
+      return;
+    }
+    this.broadcastJobStatus(job.status, job);
+  }
+
+  /**
    * 广播 job.accepted。
    *
    * @param job adapter job 快照
    * @param status 状态
    */
   private broadcastJobAccepted(
-    job: {
-      jobId: string;
-      affairId: string;
-      goal: string;
-      workspaceHint?: string | null;
-      allowedPermissions: readonly string[];
-      progressSummary: string;
-      blockedReason: string | null;
-      resumeCondition: string | null;
-    },
+    job: DelegatorJobProjection,
     status: JobStatus,
   ): void {
     this.applyAndMaybeSend(
-      createEnvelope({
-        source: { kind: "companion", deviceId: this.deps.desktopDeviceId },
-        target: { kind: "phone", deviceId: this.deps.getPhoneDeviceId() ?? "unknown" },
+      buildJobEnvelope({
+        identity: this.outboundIdentity(),
         type: "job.accepted",
-        payload: toJobPayload(job, status),
+        status,
+        job,
       }),
     );
   }
@@ -383,33 +412,19 @@ export class JobDelegator {
   /**
    * 广播 job 状态 envelope（先 apply 到 backend，再按需发给 phone）。
    *
-   * @param jobId job id
    * @param status 状态
    * @param job adapter job 快照
    */
   private broadcastJobStatus(
-    jobId: string,
     status: JobStatus,
-    job: {
-      jobId: string;
-      affairId: string;
-      goal: string;
-      workspaceHint?: string | null;
-      allowedPermissions: readonly string[];
-      progressSummary: string;
-      blockedReason: string | null;
-      resumeCondition: string | null;
-      permissionRequestId?: string | null;
-    },
+    job: DelegatorJobProjection,
   ): void {
-    const payload = toJobPayload(job, status);
-    const type = statusToEnvelopeType(status);
     this.applyAndMaybeSend(
-      createEnvelope({
-        source: { kind: "companion", deviceId: this.deps.desktopDeviceId },
-        target: { kind: "phone", deviceId: this.deps.getPhoneDeviceId() ?? "unknown" },
-        type,
-        payload,
+      buildJobEnvelope({
+        identity: this.outboundIdentity(),
+        type: statusToEnvelopeType(status),
+        status,
+        job,
       }),
     );
   }
@@ -420,22 +435,16 @@ export class JobDelegator {
    * @param jobId job id
    * @param affairId affair id
    * @param message 失败原因
+   * @param code 稳定错误码
    */
-  private broadcastJobFailure(jobId: string, affairId: string, message: string): void {
-    this.broadcastJobStatus(
-      jobId,
-      "failed",
-      {
-        jobId,
-        affairId,
-        goal: message.trim() || "delegation_failed",
-        workspaceHint: null,
-        allowedPermissions: [],
-        progressSummary: message,
-        blockedReason: message,
-        resumeCondition: null,
-      },
-    );
+  private broadcastJobFailure(
+    jobId: string,
+    affairId: string,
+    message: string,
+    code?: string,
+    context?: DelegationFailureContext,
+  ): void {
+    this.broadcastJobStatus("failed", buildDelegationFailureJob(jobId, affairId, message, code, context));
   }
 
   /**
@@ -453,13 +462,10 @@ export class JobDelegator {
       return;
     }
     this.affairLastStatus.set(affairId, affair.status);
-    this.applyAndMaybeSend(
-      createEnvelope({
-        source: { kind: "companion", deviceId: this.deps.desktopDeviceId },
-        target: { kind: "phone", deviceId: this.deps.getPhoneDeviceId() ?? "unknown" },
-        type: "affair.update",
-        payload: affair,
-      }),
-    );
+    this.applyAndMaybeSend(buildAffairUpdateEnvelope(this.outboundIdentity(), affair));
+  }
+
+  private outboundIdentity() {
+    return outboundIdentityFromDeps(this.deps);
   }
 }

@@ -19,6 +19,9 @@
     "status": {
       "enum": ["queued", "running", "needs_permission", "blocked", "completed", "failed", "canceled"]
     },
+    "purpose": {
+      "enum": ["execution", "exploration"]
+    },
     "goal": {
       "type": "string",
       "minLength": 1
@@ -43,8 +46,14 @@
     },
     "permissionRequestId": {
       "type": ["string", "null"]
+    },
+    "statusReasonCode": {
+      "type": ["string", "null"]
+    },
+    "statusObservedAt": {
+      "type": ["string", "null"],
+      "format": "date-time"
     }
   },
   "additionalProperties": false
 }
-

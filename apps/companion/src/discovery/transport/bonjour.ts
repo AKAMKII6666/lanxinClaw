@@ -7,6 +7,7 @@
  */
 
 import Bonjour from "bonjour-service";
+import type { ServiceConfig } from "bonjour-service";
 import type {
   MdnsBrowserHandle,
   MdnsPublication,
@@ -33,6 +34,21 @@ interface BonjourBrowserLike {
 /** bonjour 已发布服务最小形状 */
 interface BonjourPublishedLike {
   stop: (cb?: () => void) => void;
+}
+
+export interface BonjourMdnsTransportOptions {
+  interfaceAddress?: string;
+}
+
+interface BonjourConstructorOptions extends Partial<ServiceConfig> {
+  interface?: string;
+}
+
+export function resolveBonjourConstructorOptions(
+  options: BonjourMdnsTransportOptions = {},
+): BonjourConstructorOptions | undefined {
+  const interfaceAddress = options.interfaceAddress?.trim();
+  return interfaceAddress ? { interface: interfaceAddress } : undefined;
 }
 
 /**
@@ -69,8 +85,8 @@ function toSnapshot(service: BonjourServiceLike): MdnsServiceSnapshot {
  *
  * @returns 真实组播传输
  */
-export function createBonjourMdnsTransport(): MdnsTransport {
-  const bonjour = new Bonjour();
+export function createBonjourMdnsTransport(options: BonjourMdnsTransportOptions = {}): MdnsTransport {
+  const bonjour = new Bonjour(resolveBonjourConstructorOptions(options));
   const browsers: BonjourBrowserLike[] = [];
 
   return {
