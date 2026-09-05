@@ -187,6 +187,17 @@ describe("protocol message contract 正反例", () => {
     );
   });
 
+  it("正例：job 可携带可选 taskIntentId，未知 job 字段仍拒绝", () => {
+    assert.equal(
+      validatePayloadForType("job.create", jobPayload({ taskIntentId: "task_intent_contract_001" })).ok,
+      true,
+    );
+    assert.equal(
+      validatePayloadForType("job.create", jobPayload({ unexpectedField: "nope" })).ok,
+      false,
+    );
+  });
+
   it("反例：chat.message 不得冒充系统指令字段（未知 key）", () => {
     const bad = validatePayloadForType("chat.message", {
       chatMessageId: "chat_1",

@@ -320,6 +320,85 @@ describe("raw websocket gateway transport (protocol v4)", () => {
     }
   });
 
+  it("tasks.list 探针不携带 runId，history 支持 content parts", async () => {
+    const frames: Array<Record<string, unknown>> = [];
+    const server = await startProtocolV4Server((frame) => {
+      frames.push(frame);
+      if (frame.method === "connect") {
+        return {
+          type: "hello-ok",
+          protocol: 4,
+          features: { methods: ["tasks.list", "chat.history"], events: [] },
+          server: { version: "x", connId: "c" },
+        };
+      }
+      if (frame.method === "agent") {
+        return { runId: "gw_run_task_params", status: "accepted" };
+      }
+      if (frame.method === "agent.wait") {
+        return {
+          runId: "gw_run_task_params",
+          status: "ok",
+          endedAt: "2026-07-22T00:00:00.000Z",
+        };
+      }
+      if (frame.method === "tasks.list") {
+        return {
+          tasks: [
+            {
+              runId: "gw_run_task_params",
+              status: "completed",
+              terminalSummary: "新闻页面已打开",
+            },
+          ],
+        };
+      }
+      if (frame.method === "chat.history") {
+        return {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "新闻页面已打开，并显示泥石流相关新闻。" }],
+            },
+          ],
+        };
+      }
+      throw new GatewayTransportError("gateway_test_unexpected", "unexpected", false);
+    });
+    try {
+      const transport = createRawWebSocketGatewayTransport({
+        gatewayUrl: server.url,
+        authProvider: () => "t",
+        timeoutMs: 1000,
+        getRunTimeoutMs: 200,
+      });
+      const created = await transport.createRun({
+        agentId: "main",
+        idempotencyKey: "k-task-params",
+        input: "open news",
+        sessionKey: "lanxing-job:job_task_params",
+        workspaceHint: null,
+        scopes: ["desktop.control"],
+        timeoutMs: null,
+      });
+      const read = await transport.getRun(created.runId, {
+        jobId: "job_task_params",
+        affairId: "affair_task_params",
+        sessionKey: "lanxing-job:job_task_params",
+      });
+
+      const taskFrame = frames.find((frame) => frame.method === "tasks.list");
+      const taskParams = taskFrame?.params as { runId?: string; limit?: number };
+      assert.equal(taskParams.runId, undefined);
+      assert.equal(taskParams.limit, 20);
+      assert.equal(read.evidence?.task?.terminalOutcome, undefined);
+      assert.equal(read.evidence?.task?.terminalSummary, "新闻页面已打开");
+      assert.match(read.evidence?.finalReply?.text ?? "", /泥石流相关新闻/);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("audit.activity.list 证据进入 toolFindings", async () => {
     const server = await startProtocolV4Server((frame) => {
       if (frame.method === "connect") {

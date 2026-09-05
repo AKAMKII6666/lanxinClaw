@@ -82,6 +82,7 @@ const DECISION_RULES: readonly DecisionRule[] = [
   runFailedRule,
   lifecycleFailedRule,
   terminalTimeoutRule,
+  terminalWithoutResultRule,
   completedRule,
   acceptedRule,
   waitOnlyTimeoutRule,
@@ -304,19 +305,138 @@ function terminalTimeoutRule(context: DecisionContext): OpenClawToLanxinJobDecis
 }
 
 function completedRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
-  const { evidence, rawRunStatus, taskOutcome } = context;
-  if (rawRunStatus !== "completed" && !isWaitOkWithTerminalEvidence(evidence) && taskOutcome !== "completed") {
+  const { evidence, taskOutcome } = context;
+  if (!hasTerminalSuccessSignal(context)) {
+    return null;
+  }
+  if (hasNegativeToolFinding(evidence) || hasNegativeFinalReply(evidence)) {
+    return null;
+  }
+  if (!hasBusinessCompletionEvidence(context)) {
     return null;
   }
   return decision("completed", evidence, {
-    kind: taskOutcome === "completed" ? "task.completed" : "wait.completed",
+    kind: hasMeaningfulTaskResult(evidence) ? "task.completed" : "wait.completed",
     strength: "medium",
     reasonCode: "openclaw.run_completed",
     summary: summaryFromEvidence(evidence, "OpenClaw run 已结束"),
     blockedReason: null,
     resumeCondition: null,
-    rawRunStatus,
+    rawRunStatus: context.rawRunStatus,
   });
+}
+
+function terminalWithoutResultRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
+  if (!hasTerminalSuccessSignal(context) || hasBusinessCompletionEvidence(context)) {
+    return null;
+  }
+  const reason = "OpenClaw 已结束，但没有返回可验收的任务结果；需要张老板复验或换一种执行方式";
+  return decision("blocked", context.evidence, {
+    kind: "wait.ended_without_result",
+    strength: "medium",
+    reasonCode: "openclaw.terminal_without_result",
+    summary: reason,
+    blockedReason: reason,
+    resumeCondition: "需要张老板向用户说明执行结果缺失，并确认是否重试或换方案",
+    rawRunStatus: context.rawRunStatus,
+  });
+}
+
+function hasTerminalSuccessSignal(context: DecisionContext): boolean {
+  return (
+    context.rawRunStatus === "completed" ||
+    isWaitOkWithTerminalEvidence(context.evidence) ||
+    context.taskOutcome === "completed"
+  );
+}
+
+function hasBusinessCompletionEvidence(context: DecisionContext): boolean {
+  const { evidence, taskOutcome } = context;
+  if (taskOutcome === "completed" && hasMeaningfulTaskResult(evidence)) {
+    return true;
+  }
+  if (hasMeaningfulToolCompletionEvidence(context)) {
+    return true;
+  }
+  if (requiresStructuredCompletionEvidence(context)) {
+    return false;
+  }
+  return hasMeaningfulFinalReply(evidence);
+}
+
+function hasMeaningfulToolCompletionEvidence(context: DecisionContext): boolean {
+  const succeeded = context.evidence.toolFindings.filter((finding) => finding.status === "succeeded");
+  if (succeeded.length === 0) {
+    return false;
+  }
+  if (!requiresStructuredCompletionEvidence(context)) {
+    return true;
+  }
+  return succeeded.some((finding) => {
+    const summary = safeText(finding.summary ?? "");
+    return isMeaningfulCompletionText(summary) && !isProcessOnlyToolSummary(summary, finding.toolName);
+  });
+}
+
+function requiresStructuredCompletionEvidence(context: DecisionContext): boolean {
+  const permissions = new Set(context.job.allowedPermissions);
+  if (
+    permissions.has("workspace.write") ||
+    permissions.has("command.run") ||
+    permissions.has("network.access") ||
+    permissions.has("desktop.control")
+  ) {
+    return true;
+  }
+  const goal = safeText(context.job.goal);
+  return /(browser|web|http|https|url|news|search|浏览器|网页|网址|新闻|搜索|联网)/i.test(goal);
+}
+
+function isProcessOnlyToolSummary(summary: string, toolName?: string): boolean {
+  const text = safeText(`${toolName ?? ""} ${summary}`);
+  if (!text) {
+    return true;
+  }
+  if (/^(ok|done|completed|complete|success|succeeded|stop|stopped|end|ended)$/i.test(summary)) {
+    return true;
+  }
+  const hasResultSignal =
+    /(found|result|results|content|article|summary|extracted|read|listed|wrote|updated|saved|passed|查到|找到|结果|内容|正文|文章|摘要|读取|列出|写入|更新|保存|通过)/i.test(text);
+  if (hasResultSignal) {
+    return false;
+  }
+  return /(browser|open|opened|launch|launched|navigate|navigated|click|clicked|start|started|blank|空白页)/i.test(text);
+}
+
+function hasMeaningfulFinalReply(evidence: OpenClawExecutionEvidence): boolean {
+  if (hasNegativeFinalReply(evidence)) {
+    return false;
+  }
+  return isMeaningfulCompletionText(evidence.finalReply?.text);
+}
+
+function hasMeaningfulTaskResult(evidence: OpenClawExecutionEvidence): boolean {
+  return (
+    isMeaningfulCompletionText(evidence.task?.terminalSummary) ||
+    isMeaningfulCompletionText(evidence.task?.progressSummary) ||
+    isMeaningfulCompletionText(evidence.task?.terminalOutcome)
+  );
+}
+
+function isMeaningfulCompletionText(value: string | null | undefined): boolean {
+  const text = safeText(value ?? "");
+  return Boolean(
+    text && !/^(ok|done|completed|complete|success|succeeded|stop|stopped|end|ended)$/i.test(text),
+  );
+}
+
+function hasNegativeToolFinding(evidence: OpenClawExecutionEvidence): boolean {
+  return evidence.toolFindings.some((finding) =>
+    finding.status === "failed" ||
+    finding.status === "blocked" ||
+    finding.status === "timed_out" ||
+    finding.status === "cancelled"
+  );
 }
 
 function acceptedRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {

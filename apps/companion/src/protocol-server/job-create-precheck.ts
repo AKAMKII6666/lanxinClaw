@@ -51,7 +51,7 @@ export function precheckJobCreate(
     return {
       ok: false,
       code: "job_id_conflict",
-      message: "jobId 已存在但 affairId/goal/purpose/allowedPermissions 不一致",
+      message: "jobId 已存在但 affairId/goal/purpose/allowedPermissions/taskIntentId 不一致",
       retryable: false,
     };
   }
@@ -118,9 +118,17 @@ function isEquivalentJobCreate(existing: JobPayload, incoming: JobPayload): bool
     existing.affairId === incoming.affairId &&
     existing.goal === incoming.goal &&
     normalizePurpose(existing.purpose) === normalizePurpose(incoming.purpose) &&
+    taskIntentCompatible(existing, incoming) &&
     normalizePermissions(existing.allowedPermissions) ===
       normalizePermissions(incoming.allowedPermissions ?? [])
   );
+}
+
+function taskIntentCompatible(existing: JobPayload, incoming: JobPayload): boolean {
+  if (!existing.taskIntentId || !incoming.taskIntentId) {
+    return true;
+  }
+  return existing.taskIntentId === incoming.taskIntentId;
 }
 
 /**

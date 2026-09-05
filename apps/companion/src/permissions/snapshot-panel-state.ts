@@ -20,6 +20,11 @@ export function projectPermissionPanelFromSnapshot(
   snapshot: ControlPanelSnapshotView,
   pendingCards: PendingPermissionCardView[],
 ): PermissionPanelView {
+  const affairTitleById = new Map((snapshot.affairs ?? []).map((affair) => [affair.affairId, affair.title]));
+  const enrichedPendingCards = pendingCards.map((card) => ({
+    ...card,
+    affairTitle: card.affairId ? affairTitleById.get(card.affairId) ?? null : null,
+  }));
   const pairedDevice =
     snapshot.device.phoneDeviceId && snapshot.device.pairingId
       ? [{
@@ -34,13 +39,13 @@ export function projectPermissionPanelFromSnapshot(
       : [];
   return {
     pairedDevices: pairedDevice,
-    currentJobId: snapshot.currentAffair?.currentJobId ?? pendingCards[0]?.jobId ?? null,
-    jobPermissions: pendingCards.map((card) => ({
+    currentJobId: snapshot.currentAffair?.currentJobId ?? enrichedPendingCards[0]?.jobId ?? null,
+    jobPermissions: enrichedPendingCards.map((card) => ({
       permissionId: card.scopeSummary,
       scopeSummary: card.scopeSummary,
       grantStatus: "pending",
     })),
-    pendingCards,
+    pendingCards: enrichedPendingCards,
     auditRecords: [],
   };
 }

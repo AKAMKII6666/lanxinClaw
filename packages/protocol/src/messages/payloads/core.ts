@@ -78,6 +78,8 @@ export interface JobPayload {
   resumeCondition?: string | null;
   /** 关联权限请求 */
   permissionRequestId?: string | null;
+  /** phone 侧生成的任务意图幂等键；可空，旧端可不传 */
+  taskIntentId?: string | null;
   /** companion 对当前状态的稳定理由码；由 companion 生成，可空 */
   statusReasonCode?: string | null;
   /** companion 最近一次采纳状态证据的 ISO-8601 时间；由 companion 生成，可空 */

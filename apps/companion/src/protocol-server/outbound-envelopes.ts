@@ -134,6 +134,25 @@ export function buildAffairResumeEnvelope(
 }
 
 /**
+ * 构造 affair.close（payload 必须是 close/cancel 后的 affair 对象）。
+ *
+ * @param party 寻址
+ * @param payload 事务载荷
+ * @returns envelope
+ */
+export function buildAffairCloseEnvelope(
+  party: OutboundParty,
+  payload: AffairPayload,
+): ProtocolEnvelope<any> {
+  return createEnvelope({
+    source: { kind: "companion", deviceId: party.desktopDeviceId },
+    target: { kind: "phone", deviceId: party.phoneDeviceId },
+    type: "affair.close",
+    payload,
+  });
+}
+
+/**
  * 构造 job.needs_permission。
  *
  * @param party 寻址

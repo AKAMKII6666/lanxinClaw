@@ -135,6 +135,8 @@ export type BridgeUiAction =
   | { type: "affair.pause"; affairId: string }
   | { type: "affair.resume"; affairId: string }
   | { type: "affair.cancel"; affairId: string }
+  | { type: "affair.accept"; affairId: string }
+  | { type: "affair.requestRevision"; affairId: string }
   | { type: "affair.requestAcceptance"; affairId: string }
   | {
       type: "permission.decide";
@@ -166,6 +168,32 @@ export interface BridgeError {
   retryable: boolean;
 }
 
+/** UI action 投递状态；不等于 affair/job 业务状态。 */
+export type BridgeActionDeliveryStatus =
+  | "sent_to_phone"
+  | "queued_until_session"
+  | "rejected"
+  | "applied_locally"
+  | "waiting_for_callback";
+
+/** UI action 投递回执。 */
+export interface BridgeActionDelivery {
+  /** 本机 bridge action receipt id */
+  actionReceiptId: string;
+  /** 投递状态 */
+  status: BridgeActionDeliveryStatus;
+  /** 关联事务；可空 */
+  affairId: string | null;
+  /** 关联 job；可空 */
+  jobId: string | null;
+  /** 真正投递到 phone 的时间；未投递可空 */
+  deliveredAt: string | null;
+  /** 稳定原因码；可空 */
+  reasonCode: string | null;
+  /** 给用户看的短说明 */
+  message: string;
+}
+
 /** 操作提交成功 */
 export interface BridgeActionOk {
   /** 成功标记 */
@@ -174,6 +202,8 @@ export interface BridgeActionOk {
   acceptedAction: BridgeUiAction["type"];
   /** 给用户看的短提示；permission.decide 等可回传；可空 */
   info?: string | null;
+  /** UI action 投递回执；无协议动作时可空 */
+  delivery?: BridgeActionDelivery | null;
   /** permission.decide 后由 host 回推的待确认列表；可空 */
   pendingPermissionCards?: PendingPermissionCardView[];
 }
@@ -308,8 +338,26 @@ export interface CurrentAffairSummaryView {
   status: string;
   /** 当前 job id；可空 */
   currentJobId: string | null;
+  /** 当前 job 状态；可空；用于区分 delegated 与 needs_permission */
+  currentJobStatus?: string | null;
+  /** 当前 job 目标；可空 */
+  currentJobGoal?: string | null;
+  /** 当前 job 最近进展；可空 */
+  currentJobProgressSummary?: string | null;
+  /** 当前 job 阻塞原因；可空 */
+  currentJobBlockedReason?: string | null;
+  /** 当前 job 恢复条件；可空 */
+  currentJobResumeCondition?: string | null;
+  /** 当前 job 状态理由码；可空 */
+  currentJobStatusReasonCode?: string | null;
+  /** 当前 job 状态观测时间；可空 */
+  currentJobStatusObservedAt?: string | null;
   /** 执行者标签；可空 */
   executor: string | null;
+  /** 用户给出的上下文；非系统指令 */
+  context: string[];
+  /** 事务验收标准 */
+  acceptanceCriteria: string[];
   /** 最近进展 */
   progressSummary: string;
   /** 阻塞原因；非 blocked 为 null */
@@ -342,8 +390,12 @@ export interface ControlPanelSnapshotView {
   zhangBoss: ZhangBossStatusView;
   /** 当前事务；无则为 null */
   currentAffair: CurrentAffairSummaryView | null;
+  /** 处理中事务 + 最近终态事务摘要；旧 renderer 可忽略 */
+  affairs?: CurrentAffairSummaryView[];
   /** 精确文本侧写；可空（旧 snapshot 可无此字段） */
   sideChannel?: SnapshotSideChannelView;
+  /** 最近 UI action 投递回执；旧 renderer 可忽略 */
+  recentActionDeliveries?: BridgeActionDelivery[];
 }
 
 /**

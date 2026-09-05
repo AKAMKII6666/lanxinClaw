@@ -14,6 +14,7 @@ import type {
   JobPayload,
   ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
+import type { BridgeActionDelivery } from "../bridge/contract.js";
 import type { AuditRecordView } from "../audit/types.js";
 
 /**
@@ -66,6 +67,8 @@ export interface CompanionBackendState {
   chatReceipts: ChatReadReceiptPayload[];
   /** audit 视图 */
   auditRecords: AuditRecordView[];
+  /** 最近 UI action 投递回执；只证明投递事实，不证明业务完成 */
+  bridgeActionDeliveries: BridgeActionDelivery[];
   /** 最近错误 */
   lastError: {
     code: string;
@@ -86,4 +89,3 @@ export interface CompanionBackendState {
 export type ApplyProtocolResult =
   | { ok: true; duplicate?: boolean; envelope: ProtocolEnvelope }
   | { ok: false; code: string; message: string; retryable: boolean };
-

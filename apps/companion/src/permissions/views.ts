@@ -57,6 +57,8 @@ export interface PendingPermissionCardView {
   requester: "zhang-boss" | "companion" | "openclaw-adapter";
   /** 关联事务；可空 */
   affairId: string | null;
+  /** 关联事务标题；可空 */
+  affairTitle?: string | null;
   /** 关联 job */
   jobId: string;
   /** 请求原因 */

@@ -17,7 +17,7 @@ import type {
 } from "../../../../evidence/openclaw-execution-evidence.js";
 import type { OpenClawRunStatus } from "../../../../status/openclaw-run-status.js";
 import { parseToolFindingsFromRunPayload, type SupplementalEvidence } from "./probes.js";
-import { readRecord, readString, readTimeLike } from "../framing/readers.js";
+import { readRecord, readString, readTextLike, readTimeLike } from "../framing/readers.js";
 
 /** 状态别名 → legacy snapshot 状态；wait-only timeout 的原始语义仍保留在 evidence。 */
 const STATUS_ALIASES: Record<string, OpenClawRunStatus> = {
@@ -199,7 +199,7 @@ function parseFinalReplyFromRunPayload(
   summary: string | null,
   rawStatus: string,
 ): OpenClawFinalReplyEvidence | undefined {
-  const text = readString(raw, ["finalReply", "reply", "message", "text", "output"]) ?? summary;
+  const text = readTextLike(raw, ["finalReply", "reply", "message", "text", "output"]) ?? summary;
   if (!text) {
     return undefined;
   }

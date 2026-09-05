@@ -46,6 +46,9 @@ export function PendingPermissionCardsSection(props: {
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
               请求方：{labelOf(REQUESTER_LABEL, card.requester)} · 风险：{card.risk}
             </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              事务：{card.affairTitle ?? card.affairId ?? "未绑定"} · Job：{card.jobId}
+            </Typography>
             <Typography variant="body2" sx={{ mt: 1 }}>
               原因：{card.reason}
             </Typography>

@@ -6,7 +6,7 @@
  * 纯函数：不产生 I/O。
  */
 
-import { PROTOCOL_VERSION, type AffairPayload } from "@lanxin-claw/protocol";
+import { PROTOCOL_VERSION, type AffairPayload, type JobPayload } from "@lanxin-claw/protocol";
 import type {
   ClawCoreStatusView,
   CompanionStatusView,
@@ -52,8 +52,12 @@ export function projectControlPanelSnapshot(
   state: CompanionBackendState,
   extras: SnapshotProjectionExtras = {},
 ): ControlPanelSnapshotView {
-  const currentAffair = pickPriorityAffair(state);
   const generatedAt = state.updatedAt;
+  const currentAffairRef = toActiveAffairRefs(state)[0] ?? null;
+  const currentAffair = currentAffairRef
+    ? toCurrentAffairSummary(state, currentAffairRef, generatedAt)
+    : null;
+  const affairs = toTaskAffairRefs(state).map((affair) => toCurrentAffairSummary(state, affair, generatedAt));
   const pending = extras.pendingContextCount ?? 0;
   const companionMessage =
     extras.companion?.message ??
@@ -107,7 +111,9 @@ export function projectControlPanelSnapshot(
       activeCallId: null,
       summary: currentAffair ? `正在盯「${currentAffair.title}」` : null,
     },
-    currentAffair: currentAffair ? toCurrentAffairSummary(state, currentAffair, generatedAt) : null,
+    currentAffair,
+    affairs,
+    recentActionDeliveries: state.bridgeActionDeliveries.slice(0, 20),
     sideChannel: {
       pendingContextCount: extras.pendingContextCount ?? 0,
       messages: state.chatMessages.map((item) => ({
@@ -135,26 +141,50 @@ export function projectControlPanelSnapshot(
  * @returns 优先事务
  */
 export function pickPriorityAffair(state: CompanionBackendState): AffairPayload | null {
-  return toAffairRef(state);
+  return toActiveAffairRefs(state)[0] ?? null;
 }
 
 /**
  * @param state state
  * @returns 优先 affair 载荷
  */
-function toAffairRef(state: CompanionBackendState): AffairPayload | null {
+function toActiveAffairRefs(state: CompanionBackendState): AffairPayload[] {
   const items = [...state.affairs.values()].filter(
     (item) => item.status !== "closed" && item.status !== "canceled",
   );
+  return sortAffairsByPriority(state, items, AFFAIR_PRIORITY);
+}
+
+function toTaskAffairRefs(state: CompanionBackendState): AffairPayload[] {
+  const open = [...state.affairs.values()].filter(
+    (item) => item.status !== "closed" && item.status !== "canceled",
+  );
+  const terminal = [...state.affairs.values()]
+    .filter((item) => item.status === "closed" || item.status === "canceled")
+    .sort((left, right) => Date.parse(updatedAtForAffair(state, right)) - Date.parse(updatedAtForAffair(state, left)))
+    .slice(0, 10);
+  return [...sortAffairsByPriority(state, open, AFFAIR_PRIORITY), ...terminal];
+}
+
+function sortAffairsByPriority(
+  state: CompanionBackendState,
+  items: AffairPayload[],
+  priority: Record<string, number>,
+): AffairPayload[] {
   items.sort((left, right) => {
-    const lp = AFFAIR_PRIORITY[left.status] ?? 99;
-    const rp = AFFAIR_PRIORITY[right.status] ?? 99;
+    const lp = priority[left.status] ?? 99;
+    const rp = priority[right.status] ?? 99;
     if (lp !== rp) {
       return lp - rp;
     }
+    const lt = Date.parse(updatedAtForAffair(state, left));
+    const rt = Date.parse(updatedAtForAffair(state, right));
+    if (Number.isFinite(lt) && Number.isFinite(rt) && lt !== rt) {
+      return rt - lt;
+    }
     return left.affairId.localeCompare(right.affairId);
   });
-  return items[0] ?? null;
+  return items;
 }
 
 /**
@@ -168,17 +198,39 @@ function toCurrentAffairSummary(
   affair: AffairPayload,
   generatedAt: string,
 ): CurrentAffairSummaryView {
+  const job = affair.currentJobId ? state.jobs.get(affair.currentJobId) : undefined;
   return {
     affairId: affair.affairId,
     title: affair.title,
     status: affair.status,
     currentJobId: affair.currentJobId ?? null,
-    executor: affair.currentJobId ? "openclaw" : null,
-    progressSummary: progressForAffair(state, affair.affairId),
+    currentJobStatus: job?.status ?? null,
+    currentJobGoal: nonEmptyOrNull(job?.goal),
+    currentJobProgressSummary: nonEmptyOrNull(job?.progressSummary),
+    currentJobBlockedReason: nonEmptyOrNull(job?.blockedReason),
+    currentJobResumeCondition: nonEmptyOrNull(job?.resumeCondition),
+    currentJobStatusReasonCode: nonEmptyOrNull(job?.statusReasonCode),
+    currentJobStatusObservedAt: nonEmptyOrNull(job?.statusObservedAt),
+    executor: job ? "openclaw" : null,
+    context: [...affair.context],
+    acceptanceCriteria: [...affair.acceptanceCriteria],
+    progressSummary: progressForAffair(state, affair),
     blockedReason: affair.blockedReason ?? null,
     resumeCondition: affair.resumeCondition ?? null,
-    updatedAt: generatedAt,
+    updatedAt: updatedAtForAffair(state, affair) || generatedAt,
   };
+}
+
+function nonEmptyOrNull(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text : null;
+}
+
+function updatedAtForAffair(state: CompanionBackendState, affair: AffairPayload): string {
+  const job = affair.currentJobId
+    ? state.jobs.get(affair.currentJobId)
+    : [...state.jobs.values()].reverse().find((item) => item.affairId === affair.affairId);
+  return job?.statusObservedAt ?? state.updatedAt;
 }
 
 /**
@@ -186,7 +238,35 @@ function toCurrentAffairSummary(
  * @param affairId 事务
  * @returns 进度摘要
  */
-function progressForAffair(state: CompanionBackendState, affairId: string): string {
-  const job = [...state.jobs.values()].reverse().find((item) => item.affairId === affairId);
+function progressForAffair(state: CompanionBackendState, affair: AffairPayload): string {
+  const job = affair.currentJobId
+    ? state.jobs.get(affair.currentJobId)
+    : [...state.jobs.values()].reverse().find((item) => item.affairId === affair.affairId);
+  const conflict = terminalConflictSummary(affair, job);
+  if (conflict) {
+    return conflict;
+  }
+  if (affair.status === "canceled") {
+    return "事务已取消";
+  }
+  if (affair.status === "closed") {
+    return "事务已关闭";
+  }
   return job?.progressSummary || "等待执行进展";
+}
+
+function terminalConflictSummary(affair: AffairPayload, job: JobPayload | undefined): string | null {
+  const status = job?.status;
+  if (!status || (affair.status !== "canceled" && affair.status !== "closed")) {
+    return null;
+  }
+  if (affair.status === "canceled" && status !== "canceled") {
+    return status === "completed"
+      ? "历史状态冲突：事务曾被取消，但执行结果后来回来了"
+      : "历史状态冲突：事务已取消，但执行 job 仍有后续状态";
+  }
+  if (affair.status === "closed" && status !== "completed") {
+    return "历史状态冲突：事务已关闭，但执行 job 不是完成态";
+  }
+  return null;
 }

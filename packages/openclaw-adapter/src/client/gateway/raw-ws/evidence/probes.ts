@@ -18,7 +18,7 @@ import type {
   OpenClawToolFindingStatus,
 } from "../../../../evidence/openclaw-execution-evidence.js";
 import { GatewayTransportError } from "../../transport.js";
-import { readNumber, readRecord, readRecordArray, readString, readTimeLike } from "../framing/readers.js";
+import { readNumber, readRecord, readRecordArray, readString, readTextLike, readTimeLike } from "../framing/readers.js";
 
 /** Gateway RPC 函数。 */
 export type GatewayRpc = (
@@ -107,7 +107,7 @@ async function collectTask(
   if (!shouldTryMethod(capabilities, "tasks.list")) {
     return;
   }
-  const result = await optionalRpc(ws, "tasks.list", probeParams(context, 20), context.timeoutMs, rpc);
+  const result = await optionalRpc(ws, "tasks.list", taskListParams(20), context.timeoutMs, rpc);
   output.probeResults.push(probeResult("task", result, "tasks.list"));
   if (result.ok) {
     const task = parseTaskPayload(result.payload, context.runId, context.sessionKey ?? null);
@@ -160,6 +160,10 @@ function probeParams(context: SupplementalProbeContext, limit: number): Record<s
     ...(context.sessionKey ? { sessionKey: context.sessionKey } : {}),
     limit,
   };
+}
+
+function taskListParams(limit: number): Record<string, unknown> {
+  return { limit };
 }
 
 async function optionalRpc(
@@ -267,8 +271,8 @@ function parseHistoryFinalReply(payload: Record<string, unknown>): OpenClawFinal
   const items = readRecordArray(payload, ["messages", "items", "entries", "history"]);
   const lastAssistant = [...items].reverse().find(isAssistantRecord);
   const text = lastAssistant
-    ? readString(lastAssistant, ["text", "content", "message", "summary"])
-    : readString(payload, ["text", "content", "message", "summary"]);
+    ? readTextLike(lastAssistant, ["text", "content", "message", "summary"])
+    : readTextLike(payload, ["text", "content", "message", "summary"]);
   return text ? { text, source: "history", confidence: "weak" } : null;
 }
 
@@ -348,7 +352,7 @@ function toolFindingFromRecord(record: Record<string, unknown>): OpenClawToolFin
 function classifyToolStatus(text: string): OpenClawToolFindingStatus {
   const value = text.toLowerCase();
   if (!value.trim()) return "unknown";
-  if (/blocked|policy|permission|approval|denied|forbidden|not allowed|unauthorized|受限|阻止|阻塞|权限|授权|拒绝/.test(value)) return "blocked";
+  if (/blocked|policy|permission|approval|denied|forbidden|not allowed|unauthorized|disabled|no provider|unavailable|not configured|missing provider|受限|阻止|阻塞|权限|授权|不可用|未配置|拒绝/.test(value)) return "blocked";
   if (/timed_out|timeout/.test(value)) return "timed_out";
   if (/cancelled|canceled|aborted/.test(value)) return "cancelled";
   if (/failed|failure|error|errored/.test(value)) return "failed";

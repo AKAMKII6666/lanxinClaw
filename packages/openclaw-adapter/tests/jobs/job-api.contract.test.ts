@@ -69,7 +69,7 @@ describe("mapOpenClawRunStatusToJobStatus", () => {
 
 describe("applyRunSnapshotToJob 遵守 canTransitionJobStatus", () => {
   it("queued→completed 经合法路径可到达 completed", () => {
-    const next = applyRunSnapshotToJob(baseJob("queued"), snap("completed", { summary: "ok" }));
+    const next = applyRunSnapshotToJob(baseJob("queued"), snap("completed", { summary: "目录读取完成" }));
     assert.equal(next.status, "completed");
   });
 
@@ -163,6 +163,58 @@ describe("applyRunSnapshotToJob 遵守 canTransitionJobStatus", () => {
     assert.match(next.statusObservedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("wait ok 但只有 stop/endedAt 时进入 blocked 而不是待验收", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      summary: "stop",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-08-30T09:44:41.631Z",
+        wait: {
+          status: "ok",
+          endedAt: "2026-08-30T09:44:41.631Z",
+          stopReason: "stop",
+        },
+        lifecycle: {
+          endedAt: "2026-08-30T09:44:41.631Z",
+          terminalPhase: "end",
+          terminalReason: "stop",
+        },
+        toolFindings: [],
+        finalReply: {
+          text: "stop",
+          source: "wait-result",
+          confidence: "medium",
+        },
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+
+    assert.equal(next.status, "blocked");
+    assert.equal(next.statusReasonCode, "openclaw.terminal_without_result");
+    assert.match(next.blockedReason ?? "", /没有返回可验收/);
+  });
+
+  it("task completed 但没有结果摘要时不作为完成证据", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-08-30T09:45:00.000Z",
+        wait: { status: "ok", endedAt: "2026-08-30T09:45:00.000Z" },
+        lifecycle: { endedAt: "2026-08-30T09:45:00.000Z", terminalPhase: "end" },
+        toolFindings: [],
+        task: { status: "completed" },
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+
+    assert.equal(next.status, "blocked");
+    assert.equal(next.statusReasonCode, "openclaw.terminal_without_result");
+  });
+
   it("wait-only timeout 保持 running，terminal timeout 进入 failed", () => {
     const waitOnly = applyRunSnapshotToJob(baseJob("running"), {
       runId: "run_apply",
@@ -221,6 +273,117 @@ describe("applyRunSnapshotToJob 遵守 canTransitionJobStatus", () => {
     });
     assert.equal(next.status, "blocked");
     assert.equal(next.statusReasonCode, "openclaw.blocked_by_tool_or_policy");
+  });
+
+  it("web_search disabled/no provider 进入 blocked 而不是 completed", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-08-30T03:00:45.655Z",
+        wait: { status: "ok", endedAt: "2026-08-30T03:00:45.655Z" },
+        lifecycle: { endedAt: "2026-08-30T03:00:45.655Z", terminalPhase: "end" },
+        toolFindings: [
+          {
+            toolName: "web_search",
+            status: "failed",
+            summary: "web_search failed: web_search is disabled or no provider is available",
+          },
+        ],
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+    assert.equal(next.status, "blocked");
+    assert.equal(next.statusReasonCode, "openclaw.blocked_by_tool_or_policy");
+    assert.match(next.blockedReason ?? "", /no provider|disabled/);
+  });
+
+  it("browser timeout 进入 failed 而不是 completed", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-08-30T03:00:45.655Z",
+        wait: { status: "ok", endedAt: "2026-08-30T03:00:45.655Z" },
+        lifecycle: { endedAt: "2026-08-30T03:00:45.655Z", terminalPhase: "end" },
+        toolFindings: [
+          {
+            toolName: "browser.open",
+            status: "timed_out",
+            summary: "browser failed: timed out",
+          },
+        ],
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+    assert.equal(next.status, "failed");
+    assert.equal(next.statusReasonCode, "openclaw.tool_timed_out");
+    assert.match(next.blockedReason ?? "", /timed out/);
+  });
+
+  it("浏览器/网络任务只有过程型成功工具时不进入 completed", () => {
+    const job = {
+      ...baseJob("running"),
+      goal: "打开浏览器查询尼泊尔泥石流新闻",
+      allowedPermissions: ["network.access"],
+    };
+    const next = applyRunSnapshotToJob(job, {
+      runId: "run_apply",
+      status: "completed",
+      summary: "done",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-08-30T03:05:00.000Z",
+        wait: { status: "ok", endedAt: "2026-08-30T03:05:00.000Z" },
+        lifecycle: { endedAt: "2026-08-30T03:05:00.000Z", terminalPhase: "end" },
+        toolFindings: [
+          {
+            toolName: "browser.open",
+            status: "succeeded",
+            summary: "opened blank browser page",
+          },
+        ],
+        finalReply: {
+          text: "done",
+          source: "wait-result",
+          confidence: "medium",
+        },
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+
+    assert.equal(next.status, "blocked");
+    assert.equal(next.statusReasonCode, "openclaw.terminal_without_result");
+  });
+
+  it("高风险任务的成功工具带结果摘要时可以进入 completed", () => {
+    const job = {
+      ...baseJob("running"),
+      goal: "运行测试",
+      allowedPermissions: ["command.run"],
+    };
+    const next = applyRunSnapshotToJob(job, {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-08-30T03:06:00.000Z",
+        wait: { status: "ok", endedAt: "2026-08-30T03:06:00.000Z" },
+        lifecycle: { endedAt: "2026-08-30T03:06:00.000Z", terminalPhase: "end" },
+        toolFindings: [
+          {
+            toolName: "command.run",
+            status: "succeeded",
+            summary: "npm test passed with 52 tests",
+          },
+        ],
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+
+    assert.equal(next.status, "completed");
   });
 
   it("tool/audit 摘要进入 job 前会脱敏 token", () => {
@@ -489,9 +652,35 @@ describe("OpenClawAdapter create/read/cancel", () => {
     advance({
       runId: created.job.openclawRunId!,
       status: "completed",
-      patch: { summary: "ok" },
+      patch: { summary: "只读检查已完成" },
     });
     const read = await adapter.readJob("job_done");
+    assert.equal(read.ok, true);
+    if (!read.ok) {
+      return;
+    }
+    assert.equal(read.job.status, "completed");
+  });
+
+  it("成功摘要提到 permission grant 时不得误判为 final negative", async () => {
+    const { client, advance } = createMutableMockOpenClawRuntimeClient();
+    const adapter = new OpenClawAdapter({ runtime: client });
+    const created = await adapter.createJob({
+      jobId: "job_permission_granted_done",
+      affairId: "affair_permission_granted_done",
+      goal: "只读检查授权后的执行结果",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) {
+      return;
+    }
+    advance({
+      runId: created.job.openclawRunId!,
+      status: "completed",
+      patch: { summary: "adapter mock completed after permission grant" },
+    });
+    const read = await adapter.readJob("job_permission_granted_done");
     assert.equal(read.ok, true);
     if (!read.ok) {
       return;

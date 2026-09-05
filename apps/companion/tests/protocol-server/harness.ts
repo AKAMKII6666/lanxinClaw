@@ -14,7 +14,7 @@ import {
   MemoryIdentityPersistence,
   createDeviceIdentityStore,
 } from "../../src/credentials/identity-store.js";
-import { startCompanionProtocolServer } from "../../src/protocol-server/server.js";
+import { startCompanionProtocolServer, type CompanionProtocolServerOptions } from "../../src/protocol-server/server.js";
 
 /**
  * 启动测试 harness。
@@ -23,11 +23,12 @@ import { startCompanionProtocolServer } from "../../src/protocol-server/server.j
  * @returns harness 依赖
  */
 export async function startHarness(
-  options: Partial<{
-    heartbeatIntervalMs: number;
-    missedHeartbeats: number;
-    onJobCancel: (input: { jobId: string; affairId: string }) => Promise<void>;
-  }> = {},
+  options: Partial<
+    Pick<
+      CompanionProtocolServerOptions,
+      "heartbeatIntervalMs" | "missedHeartbeats" | "onJobCancel" | "logger"
+    >
+  > = {},
 ) {
   const identityStore = createDeviceIdentityStore(new MemoryIdentityPersistence());
   let server: Awaited<ReturnType<typeof startCompanionProtocolServer>>;

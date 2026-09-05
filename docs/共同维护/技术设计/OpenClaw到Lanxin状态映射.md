@@ -32,7 +32,7 @@ OpenClaw 状态只能证明 worker 执行事实，不能直接证明 Lanxin affa
 | `needs_permission` | companion permission gate | 等用户授权 |
 | `running` | OpenClaw accepted/start/progress 或 wait-only timeout | 正在做或仍在等待 |
 | `blocked` | 需要用户、权限、配置、工具能力或方案选择介入 | 卡住了，需要处理 |
-| `completed` | worker 已结束且没有负证据 | worker 认为已完成，等待 affair 层验收 |
+| `completed` | worker 已结束，且有可验收业务结果证据 | worker 产出了一版结果，等待 affair 层验收 |
 | `failed` | 当前执行尝试失败或超时 | 没做成，可由张老板决定是否重试/改方案 |
 | `canceled` | 用户取消或 companion 明确取消 | 已停止 |
 
@@ -46,14 +46,15 @@ OpenClaw 状态只能证明 worker 执行事实，不能直接证明 Lanxin affa
 | lifecycle error + liveness blocked | 强 | 可写 `blocked` |
 | lifecycle error 普通失败 | 中 | 可写 `failed` |
 | task ledger terminal | 中 | 与 run/audit 合并后可写终态 |
-| `agent.wait ok` | 中 | 不能单独 completed |
-| final assistant text | 弱 | 可生成摘要，不能单独 completed |
+| `agent.wait ok` | 中 | 只能证明 agent loop 结束，不能单独 completed |
+| final assistant text | 弱 | 可生成摘要；只有非副作用/非严格任务中，非负且非低信号文本才可作为完成佐证 |
 | 本地 adapter cache | 辅助 | 不能单独推进终态 |
 
 ## 4. 映射决策表
 
 | OpenClaw 证据 | Lanxin JobStatus | `progressSummary` | `blockedReason` / `resumeCondition` |
 |---------------|------------------|-------------------|--------------------------------------|
+| companion 收到 execution `job.create`，尚未授权 | `needs_permission` | `waiting_desktop_authorization` | 绑定 permission request，等待用户在电脑端授权 |
 | `agent` 返回 accepted/runId | `running` | `openclaw_run_accepted` | 空 |
 | `agent` 返回 `in_flight` | 保持当前状态 | `openclaw_run_in_flight` | 空 |
 | lifecycle start | `running` | `openclaw_run_started` | 空 |
@@ -69,10 +70,11 @@ OpenClaw 状态只能证明 worker 执行事实，不能直接证明 Lanxin affa
 | tool/run timed_out | `failed` | `openclaw_timeout` | `retry_or_reduce_scope` |
 | 用户取消后 abort ack | `canceled` | `cancelled_by_user` | 空 |
 | 非用户 abort/cancel | `failed` | `openclaw_run_aborted` | `retry_after_reconnect` |
-| task RPC `completed` | 待合并 | task 完成摘要 | 不能单独判 completed |
+| task RPC `completed` + 当前 job 匹配 + 摘要可验收 | `completed` | task 完成摘要 | 仍不能关闭 affair |
 | task RPC `failed` | `failed` 或 `blocked` | task 错误摘要 | 疑似 lost 时建议重连/重试 |
-| run `ok` + 无负证据 + final 非负 | `completed` | final 摘要 | 空 |
+| run `ok/completed` + 无负证据 + task/tool/final 有业务结果 | `completed` | 业务结果摘要 | 空；final 单独证明只适用于非副作用/非严格任务 |
 | run `ok` + final 明确无法完成 | `blocked` | final 摘要 | 需要用户选择替代方案 |
+| run `ok/completed` + 只有 `stop/ok/done/endedAt` 等低信号 | `blocked` | 缺少可验收结果 | 需要张老板复验或换方案 |
 
 ## 5. `ok` 的专门规则
 
@@ -83,15 +85,19 @@ OpenClaw 状态只能证明 worker 执行事实，不能直接证明 Lanxin affa
 1. `jobId/runId/sessionKey` 仍匹配当前 job。
 2. job 未被取消、未终态、未被新 run 替代。
 3. 没有 audit/tool/task 失败或阻塞证据。
-4. final reply 没有明确失败或无法完成表达。
-5. job purpose 是 `execution` 时，完成后只推进 affair 到 `waiting_acceptance`；purpose 是 `exploration` 时只回写探索结果。
+4. 存在可验收业务结果证据：当前 job 的 task completed、tool succeeded，或在非副作用/非严格任务中 final reply 是非负且非低信号文本。
+5. `stop`、`ok`、`done`、`endedAt` 只说明执行器结束，不算可验收业务结果。
+6. job purpose 是 `execution` 时，完成后只推进 affair 到 `waiting_acceptance`；purpose 是 `exploration` 时只回写探索结果。
+
+严格任务包括浏览器/网络/工具查询、文件写入、命令、git、桌面控制、权限/配对/session 操作。严格任务必须有结构化完成证据：task result，或成功工具摘要中包含业务结果信号。只出现“打开浏览器”“导航成功”“命令已启动”“空白页”这类 process-only tool success，不得写 `job.completed`，应进入 `blocked/openclaw.terminal_without_result`。
 
 若检查失败：
 
 - 有结构化阻塞证据：`blocked`。
 - 有结构化失败证据：`failed`。
 - 只有 final 负向文字：`blocked`，`resumeCondition` 写 `choose_alternative_or_grant_capability`。
-- 证据缺失：保持 `running` 并触发下一轮探针，超过监督窗口再 `blocked`。
+- wait 仍未终态且证据缺失：保持 `running` 并触发下一轮探针。
+- run 已终态但缺少可验收业务结果：`blocked`，reasonCode=`openclaw.terminal_without_result`。
 
 ## 6. timeout 的专门规则
 
@@ -143,16 +149,24 @@ terminal timeout 判定：
 
 Lanxin job 到 affair 的投影仍按电话侧事务簿：
 
-| Job event | Affair |
-|-----------|--------|
+| Job event / state | Affair |
+|-------------------|--------|
+| `job.needs_permission` / `job.queued` with `purpose=execution` | `delegated`，写入 `currentJobId`，明确表示已交给电脑端但还没开始执行 |
 | `job.accepted/running/progress` | `running` |
-| `job.blocked` | `blocked` |
+| `job.blocked` | `blocked`，同步 `blockedReason/resumeCondition` |
 | `job.failed` | 通常 `blocked`，由张老板解释失败并决定重试/改方案 |
 | `job.completed` with `purpose=execution` | `waiting_acceptance` |
 | `job.completed` with `purpose=exploration` | 保持澄清/当前态，写 timeline |
-| `job.canceled` | 保持或进入 `blocked/canceled`，按用户意图决定 |
+| `job.canceled` for current execution job | `blocked`，写 `last_execution_canceled`；只有另有整件事务取消证据时才 `canceled` |
 
 只有用户明确验收后，张老板/phone 才能调用 `accept_affair` 并发 `affair.close(status=closed)`。
+
+companion 后端启动或 hydrate mirror 后，必须从当前 job 反推修复非终态 execution affair：
+
+- 只从同一 `affairId` 的最新 execution job 投影；
+- 只允许沿 affair 状态机可达路径修复，不凭 job 直接关闭 affair；
+- `ready -> delegated/running/waiting_acceptance/blocked` 可作为丢事件修复；`canceled` 只能来自明确事务取消事件，不从普通 job cancel 推导；
+- 已 `closed/canceled` 的 affair 不被旧 job 复活。
 
 ## 9. 单调与幂等
 

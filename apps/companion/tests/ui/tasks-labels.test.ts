@@ -11,7 +11,7 @@ describe("tasks page labels and demo", () => {
   it("区分 waiting_acceptance 与 closed，且 completed 不等于 closed", () => {
     assert.equal(labelOf(AFFAIR_STATUS_LABEL, "waiting_acceptance"), "待验收");
     assert.equal(labelOf(AFFAIR_STATUS_LABEL, "closed"), "已关闭");
-    assert.equal(labelOf(JOB_STATUS_LABEL, "completed"), "worker 已完成");
+    assert.equal(labelOf(JOB_STATUS_LABEL, "completed"), "执行已结束");
     assert.notEqual(labelOf(JOB_STATUS_LABEL, "completed"), labelOf(AFFAIR_STATUS_LABEL, "closed"));
   });
 

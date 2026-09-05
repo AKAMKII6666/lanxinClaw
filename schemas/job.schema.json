@@ -47,6 +47,10 @@
     "permissionRequestId": {
       "type": ["string", "null"]
     },
+    "taskIntentId": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
     "statusReasonCode": {
       "type": ["string", "null"]
     },

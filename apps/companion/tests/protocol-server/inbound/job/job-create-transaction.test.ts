@@ -21,7 +21,7 @@ describe("job.create transaction", () => {
       affairId: "affair_tx",
       title: "tx",
       ownerAgent: "zhang-boss",
-      status: "running",
+      status: "ready",
       context: [],
       acceptanceCriteria: [],
       currentJobId: null,
@@ -59,6 +59,9 @@ describe("job.create transaction", () => {
     assert.ok(ack);
     assert.equal(ack!.ok, true);
     assert.equal(backend.getState().jobs.get("job_tx_ok")?.status, "needs_permission");
+    assert.equal(backend.getState().affairs.get("affair_tx")?.status, "delegated");
+    assert.equal(backend.getState().affairs.get("affair_tx")?.currentJobId, "job_tx_ok");
+    assert.equal(backend.getSnapshot().currentAffair?.currentJobStatus, "needs_permission");
     assert.equal(backend.getPermissionGate().hasPendingForJob("job_tx_ok"), true);
 
     socket.close();

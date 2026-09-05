@@ -125,6 +125,16 @@ export class PermissionGate {
   }
 
   /**
+   * 读取请求队列态；用于高风险 action 在写 grant 前复验。
+   *
+   * @param permissionRequestId 请求 id
+   * @returns 队列态；不存在为 null
+   */
+  getQueueStatus(permissionRequestId: string): PermissionQueueStatus | null {
+    return this.#queueStatus.get(permissionRequestId) ?? null;
+  }
+
+  /**
    * 检查 job 是否已持有某权限授予。
    * allow_once 在首次成功检查后消耗。
    *
@@ -335,13 +345,48 @@ export class PermissionGate {
    *
    * @param jobId job id
    */
-  clearPendingForJob(jobId: string): void {
+  clearPendingForJob(jobId: string): { expired: string[] } {
+    return this.expirePendingForJob(jobId);
+  }
+
+  /**
+   * job 被取消或父事务终态时，使相关待授权请求失效。
+   *
+   * @param jobId job id
+   * @returns 被失效的 permissionRequestId
+   */
+  expirePendingForJob(jobId: string): { expired: string[] } {
+    const expired: string[] = [];
     for (const [id, request] of this.#requests) {
       if (request.jobId === jobId && this.#queueStatus.get(id) === "pending") {
-        this.#queueStatus.set(id, "decided");
+        this.#queueStatus.set(id, "expired");
+        expired.push(id);
       }
     }
-    this.#onChange?.();
+    if (expired.length > 0) {
+      this.#onChange?.();
+    }
+    return { expired };
+  }
+
+  /**
+   * 父事务终态时，使该事务下所有待授权请求失效。
+   *
+   * @param affairId affair id
+   * @returns 被失效的 permissionRequestId
+   */
+  expirePendingForAffair(affairId: string): { expired: string[] } {
+    const expired: string[] = [];
+    for (const [id, request] of this.#requests) {
+      if (request.affairId === affairId && this.#queueStatus.get(id) === "pending") {
+        this.#queueStatus.set(id, "expired");
+        expired.push(id);
+      }
+    }
+    if (expired.length > 0) {
+      this.#onChange?.();
+    }
+    return { expired };
   }
 
   /**

@@ -9,6 +9,7 @@
 import type { AffairPayload, ProtocolEnvelope } from "@lanxin-claw/protocol";
 import { CompanionBridgeHost, type SnapshotListener } from "../bridge/host.js";
 import type {
+  BridgeActionDelivery,
   BridgeActionResult,
   BridgeUiAction,
   ControlPanelSnapshotView,
@@ -17,7 +18,11 @@ import type { PendingPermissionCardView } from "../permissions/views.js";
 import { PermissionGate } from "../permissions/gate/permission-gate.js";
 import { buildDiagnosticReport, type BuildDiagnosticReportInput } from "../diagnostics/probes.js";
 import type { DiagnosticReportView } from "../ui/pages/diagnostics/diagnostics-models.js";
-import { applyProtocolEnvelopeToState, createCompanionBackendState } from "../state/store.js";
+import {
+  applyProtocolEnvelopeToState,
+  createCompanionBackendState,
+  reconcileAffairsFromJobs,
+} from "../state/store.js";
 import { projectControlPanelSnapshot, type SnapshotProjectionExtras } from "../state/projector.js";
 import {
   hydrateBackendMirror,
@@ -26,7 +31,7 @@ import {
 } from "../state/mirror/backend-mirror.js";
 import type { ApplyProtocolResult, CompanionBackendState } from "../state/types.js";
 import { createMemoryAuditStore, type AppendAuditInput } from "../audit/memory-store.js";
-import type { AuditEventKind, AuditRecord, AuditRecordView } from "../audit/types.js";
+import type { AuditRecord, AuditRecordView } from "../audit/types.js";
 import {
   createPendingContextQueue,
   type PendingContextQueue,
@@ -38,6 +43,14 @@ import {
 } from "../supervision/tick.js";
 import { applySupervisionActions } from "../supervision/apply-actions.js";
 import type { SupervisionAction, SupervisionSnapshot } from "../supervision/types.js";
+import { validateBridgeActionAgainstState } from "./bridge-action-policy.js";
+import {
+  appendAuditForApplyFailure,
+  appendAuditForBridgeAction,
+  appendAuditForEnvelope,
+  auditRecordsToViews,
+  expirePermissionsForTerminalAffair,
+} from "./runtime-audit.js";
 
 /**
  * Backend runtime 选项。
@@ -103,6 +116,8 @@ export interface CompanionBackendRuntime {
   getDiagnosticReport(): DiagnosticReportView;
   /** pending 队列（出站 flush 用） */
   getPendingContext(): PendingContextQueue;
+  /** 记录 bridge action 投递后继回执 */
+  recordBridgeActionDelivery(delivery: BridgeActionDelivery): void;
   /** 停止监督 loop */
   stopSupervision(): void;
   /** 记录入站 messageId（job.create 等 ack 前去重） */
@@ -125,6 +140,7 @@ export function createCompanionBackendRuntime(
   if (options.mirrorStore) {
     const loaded = options.mirrorStore.load();
     hydrateBackendMirror(state, loaded);
+    reconcileAffairsFromJobs(state);
     pendingContext.restore(loaded.pendingContext ?? []);
   }
   const notifyMemory = createSupervisionNotifyMemory();
@@ -139,6 +155,11 @@ export function createCompanionBackendRuntime(
 
   function persistMirror(): void {
     options.mirrorStore?.save(snapshotBackendMirror(state, pendingContext.list()));
+  }
+
+  function rememberBridgeActionDelivery(delivery: BridgeActionDelivery): void {
+    state.bridgeActionDeliveries.unshift(delivery);
+    state.bridgeActionDeliveries.splice(50);
   }
 
   function publishSnapshot(): void {
@@ -214,7 +235,11 @@ export function createCompanionBackendRuntime(
   return {
     applyProtocolEnvelope(envelope) {
       const result = applyProtocolEnvelopeToState(state, envelope);
+      if (!result.ok) {
+        appendAuditForApplyFailure(auditStore, envelope, result);
+      }
       if (result.ok && !result.duplicate) {
+        expirePermissionsForTerminalAffair(gate, auditStore, envelope);
         appendAuditForEnvelope(auditStore, envelope);
         if (envelope.type === "job.blocked" || envelope.type === "job.failed") {
           const payload = envelope.payload as {
@@ -248,9 +273,12 @@ export function createCompanionBackendRuntime(
           desktopDeviceId: action.desktopDeviceId,
         });
       }
+      const statefulError = validateBridgeActionAgainstState(state, action, gate);
+      if (statefulError) {
+        return statefulError;
+      }
       const result = host.submitAction(action);
       if (result.ok) {
-        appendAuditForBridgeAction(auditStore, action, result);
         if (action.type === "permission.decide" && (action.decision === "allow_once" || action.decision === "allow_for_job")) {
           const request = gate.getRequest(action.permissionRequestId);
           if (request?.risk === "high") {
@@ -265,6 +293,10 @@ export function createCompanionBackendRuntime(
           }
         }
         await options.onBridgeAction?.(action, result);
+        if (result.delivery) {
+          rememberBridgeActionDelivery(result.delivery);
+        }
+        appendAuditForBridgeAction(auditStore, action, result);
       }
       publishSnapshot();
       return result;
@@ -321,6 +353,10 @@ export function createCompanionBackendRuntime(
     getPendingContext() {
       return pendingContext;
     },
+    recordBridgeActionDelivery(delivery) {
+      rememberBridgeActionDelivery(delivery);
+      publishSnapshot();
+    },
     stopSupervision() {
       if (supervisionTimer) {
         clearInterval(supervisionTimer);
@@ -332,70 +368,4 @@ export function createCompanionBackendRuntime(
       state.updatedAt = now;
     },
   };
-}
-
-const KIND_LABEL: Record<AuditEventKind, string> = {
-  pairing: "配对",
-  permission: "权限",
-  job: "Job",
-  high_risk_action: "高风险动作",
-  acceptance: "验收",
-};
-
-function auditRecordsToViews(records: readonly AuditRecord[]): AuditRecordView[] {
-  return records.map((r) => ({
-    auditId: r.auditId,
-    kindLabel: KIND_LABEL[r.kind],
-    at: r.at,
-    summary: r.summary,
-    outcome: r.outcome,
-  }));
-}
-
-function appendAuditForEnvelope(
-  auditStore: NonNullable<CompanionBackendRuntimeOptions["auditStore"]>,
-  envelope: ProtocolEnvelope,
-): void {
-  const payload = envelope.payload as { affairId?: string; jobId?: string; permissionRequestId?: string; status?: string };
-  if (envelope.type.startsWith("job.")) {
-    auditStore.append({
-      kind: "job",
-      summary: `协议事件 ${envelope.type}`,
-      affairId: payload.affairId ?? null,
-      jobId: payload.jobId ?? null,
-      permissionRequestId: payload.permissionRequestId ?? null,
-      outcome: payload.status ?? envelope.type,
-    });
-    return;
-  }
-  if (envelope.type.startsWith("pairing.") || envelope.type.startsWith("session.")) {
-    auditStore.append({
-      kind: "pairing",
-      summary: `协议事件 ${envelope.type}`,
-      outcome: envelope.type,
-    });
-  }
-}
-
-function appendAuditForBridgeAction(
-  auditStore: NonNullable<CompanionBackendRuntimeOptions["auditStore"]>,
-  action: BridgeUiAction,
-  result: BridgeActionResult,
-): void {
-  if (action.type === "permission.decide") {
-    auditStore.append({
-      kind: "permission",
-      summary: "桌面用户完成权限裁决",
-      permissionRequestId: action.permissionRequestId,
-      outcome: action.decision,
-    });
-    return;
-  }
-  if (action.type === "pairing.approve" || action.type === "pairing.reject") {
-    auditStore.append({
-      kind: "pairing",
-      summary: `桌面用户提交 ${action.type}`,
-      outcome: result.ok ? result.acceptedAction : action.type,
-    });
-  }
 }

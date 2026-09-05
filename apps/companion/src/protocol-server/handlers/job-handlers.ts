@@ -6,7 +6,7 @@
  * 副作用：写 backend/gate 并经 apply/send 出站。
  */
 
-import type { JobPayload, ProtocolEnvelope } from "@lanxin-claw/protocol";
+import { validateMessage, type JobPayload, type ProtocolEnvelope } from "@lanxin-claw/protocol";
 import { enqueueJobPermission } from "../job-permission.js";
 import {
   precheckJobCreate,
@@ -72,6 +72,13 @@ export async function handleJobCreate(
   };
   const needsEnv = buildJobNeedsPermissionEnvelope(party, jobPayload, parsed.messageId);
   const permEnv = buildPermissionRequestEnvelope(party, queued.request, parsed.messageId);
+  const outboundValid = validateJobCreateOutbound(needsEnv, permEnv);
+  if (!outboundValid.ok) {
+    gate.clearPendingForJob(payload.jobId);
+    releaseJobCreateClaim(payload.jobId);
+    sendJson(input.socket, { ok: false, error: outboundValid.error });
+    return;
+  }
   const appliedNeeds = input.options.backend.applyProtocolEnvelope(needsEnv);
   if (!appliedNeeds.ok) {
     gate.clearPendingForJob(payload.jobId);
@@ -93,6 +100,37 @@ export async function handleJobCreate(
   recordJobCreateAccepted(input.options.backend, parsed);
   releaseJobCreateClaim(payload.jobId);
   sendJson(input.socket, { ok: true, acceptedType: "job.create" });
+}
+
+function validateJobCreateOutbound(
+  needsEnv: ProtocolEnvelope,
+  permEnv: ProtocolEnvelope,
+):
+  | { ok: true }
+  | { ok: false; error: { code: string; message: string; retryable: false } } {
+  const needsValid = validateMessage(needsEnv);
+  if (!needsValid.ok) {
+    return {
+      ok: false,
+      error: {
+        code: "job_create_outbound_invalid",
+        message: needsValid.error.message,
+        retryable: false,
+      },
+    };
+  }
+  const permValid = validateMessage(permEnv);
+  if (!permValid.ok) {
+    return {
+      ok: false,
+      error: {
+        code: "job_create_outbound_invalid",
+        message: permValid.error.message,
+        retryable: false,
+      },
+    };
+  }
+  return { ok: true };
 }
 
 /**

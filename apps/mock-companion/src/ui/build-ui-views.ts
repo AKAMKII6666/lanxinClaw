@@ -17,9 +17,13 @@ import type { MemoryStore } from "../store/memory-store.js";
  * @returns affair 或 null
  */
 function pickCurrentAffair(store: MemoryStore) {
-  const values = [...store.affairs.values()];
-  const active = values.find((item) => item.status !== "closed" && item.status !== "canceled");
-  return active ?? values.at(-1) ?? null;
+  return listOpenAffairs(store)[0] ?? [...store.affairs.values()].at(-1) ?? null;
+}
+
+function listOpenAffairs(store: MemoryStore) {
+  return [...store.affairs.values()].filter(
+    (item) => item.status !== "closed" && item.status !== "canceled",
+  );
 }
 
 /**
@@ -77,12 +81,26 @@ function buildCurrentAffairBlock(
     title: affair.title,
     status: affair.status,
     currentJobId: affair.currentJobId ?? null,
+    currentJobStatus: job?.status ?? null,
+    currentJobGoal: nonEmptyOrNull(job?.goal),
+    currentJobProgressSummary: nonEmptyOrNull(job?.progressSummary),
+    currentJobBlockedReason: nonEmptyOrNull(job?.blockedReason),
+    currentJobResumeCondition: nonEmptyOrNull(job?.resumeCondition),
+    currentJobStatusReasonCode: null,
+    currentJobStatusObservedAt: null,
     executor: job?.executor ?? null,
+    context: [...affair.context],
+    acceptanceCriteria: [...affair.acceptanceCriteria],
     progressSummary: job?.progressSummary ?? "",
     blockedReason: affair.blockedReason ?? null,
     resumeCondition: affair.resumeCondition ?? null,
     updatedAt: now,
   };
+}
+
+function nonEmptyOrNull(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text : null;
 }
 
 /**
@@ -95,6 +113,7 @@ function buildCurrentAffairBlock(
 export function buildControlPanelSnapshot(store: MemoryStore, config: MockCompanionConfig) {
   const now = new Date().toISOString();
   const affair = pickCurrentAffair(store);
+  const affairs = listOpenAffairs(store).map((item) => buildCurrentAffairBlock(store, item, now));
   return {
     schemaVersion: PROTOCOL_VERSION,
     snapshotId: `ui_snap_${Date.now()}`,
@@ -135,6 +154,7 @@ export function buildControlPanelSnapshot(store: MemoryStore, config: MockCompan
       summary: affair ? `正在盯「${affair.title}」` : null,
     },
     currentAffair: affair ? buildCurrentAffairBlock(store, affair, now) : null,
+    affairs,
   };
 }
 

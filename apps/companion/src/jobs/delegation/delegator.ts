@@ -21,6 +21,7 @@ import {
 } from "./projection/delegator-outbound.js";
 import { failureContextForRequest, outboundIdentityFromDeps } from "./delegator-context.js";
 import { jobStatusFingerprint } from "./projection/job-status-fingerprint.js";
+import { canExecutePermissionGrantedJob } from "./permission-execution-precheck.js";
 import {
   DEFAULT_JOB_POLL_INTERVAL_MS,
   IN_FLIGHT_PLACEHOLDER,
@@ -61,6 +62,9 @@ export class JobDelegator {
     const jobId = request.jobId;
     const affairId = request.affairId ?? "";
     const failureContext = failureContextForRequest(this.deps, request);
+    if (!canExecutePermissionGrantedJob(this.deps, affairId, jobId)) {
+      return;
+    }
     if (this.active.has(jobId)) {
       this.deps.logger?.debug({ jobId }, "job 已在委派/轮询中，忽略重复决策");
       return;

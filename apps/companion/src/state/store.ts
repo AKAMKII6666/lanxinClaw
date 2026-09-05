@@ -18,6 +18,10 @@ import {
   type ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
 import type { ApplyProtocolResult, CompanionBackendState } from "./types.js";
+import { affairStatusForJob, projectAffairWithJob } from "./affair-job-projection.js";
+import { decideTerminalAffairJobEvent } from "./terminal-job-guard.js";
+
+export { reconcileAffairsFromJobs } from "./affair-job-projection.js";
 
 /**
  * 创建空 backend state。
@@ -44,6 +48,7 @@ export function createCompanionBackendState(startedAtMs = Date.now()): Companion
     contextAttachments: [],
     chatReceipts: [],
     auditRecords: [],
+    bridgeActionDeliveries: [],
     lastError: null,
     seenMessages: new Map(),
   };
@@ -186,10 +191,30 @@ function applyJob(
   }
   const incoming = envelope.payload as unknown as JobPayload;
   const existing = state.jobs.get(incoming.jobId);
-  const payload: JobPayload =
-    existing && !incoming.purpose && existing.purpose
-      ? { ...incoming, purpose: existing.purpose }
-      : incoming;
+  const payload: JobPayload = existing
+    ? {
+        ...incoming,
+        purpose: incoming.purpose ?? existing.purpose ?? "execution",
+        permissionRequestId: incoming.permissionRequestId ?? existing.permissionRequestId ?? null,
+        taskIntentId: incoming.taskIntentId ?? existing.taskIntentId ?? null,
+      }
+    : incoming;
+  const affair = state.affairs.get(payload.affairId);
+  const terminalDecision = decideTerminalAffairJobEvent(affair, envelope, existing, payload);
+  if (terminalDecision.action === "reject") {
+    return failWithIds(
+      "affair_terminal_for_job",
+      terminalDecision.message,
+      false,
+      state,
+      now,
+      terminalDecision.affairId,
+      terminalDecision.jobId,
+    );
+  }
+  if (terminalDecision.action === "ignore_duplicate") {
+    return { ok: true, duplicate: true, envelope };
+  }
   if (existing && !canTransitionJobStatus(existing.status, payload.status)) {
     return fail(
       "job_illegal_transition",
@@ -200,7 +225,6 @@ function applyJob(
     );
   }
   state.jobs.set(payload.jobId, cloneJob(payload));
-  const affair = state.affairs.get(payload.affairId);
   if (affair) {
     updateAffairFromJob(state, affair, payload);
   }
@@ -264,17 +288,18 @@ function updateAffairFromJob(
   if (job.purpose === "exploration") {
     return;
   }
-  const nextStatus = job.status === "completed" ? "waiting_acceptance" : job.status === "blocked" ? "blocked" : null;
-  if (!nextStatus || !canTransitionAffairStatus(affair.status, nextStatus)) {
+  if (affair.currentJobId && affair.currentJobId !== job.jobId) {
     return;
   }
-  state.affairs.set(affair.affairId, {
-    ...affair,
-    status: nextStatus,
-    currentJobId: job.jobId,
-    blockedReason: job.blockedReason ?? null,
-    resumeCondition: job.resumeCondition ?? null,
-  });
+  const nextStatus = affairStatusForJob(job);
+  if (!nextStatus) {
+    return;
+  }
+  const nextAffair = projectAffairWithJob(affair, job, nextStatus);
+  if (!canTransitionAffairStatus(affair.status, nextAffair.status)) {
+    return;
+  }
+  state.affairs.set(affair.affairId, nextAffair);
 }
 
 /**
@@ -285,7 +310,6 @@ function updateAffairFromJob(
  * @param retryable 是否可重试
  * @param state state
  * @param now 时间
- * @returns 失败
  */
 function fail(
   code: string,
@@ -294,7 +318,19 @@ function fail(
   state: CompanionBackendState,
   now: string,
 ): ApplyProtocolResult {
-  state.lastError = { code, message, occurredAt: now, affairId: null, jobId: null };
+  return failWithIds(code, message, retryable, state, now, null, null);
+}
+
+function failWithIds(
+  code: string,
+  message: string,
+  retryable: boolean,
+  state: CompanionBackendState,
+  now: string,
+  affairId: string | null,
+  jobId: string | null,
+): ApplyProtocolResult {
+  state.lastError = { code, message, occurredAt: now, affairId, jobId };
   return { ok: false, code, message, retryable };
 }
 

@@ -38,7 +38,7 @@
 |---|------|------|
 | 3.1 | affair.create → update | affair 进入 store；非法状态迁移被拒（保留旧状态） |
 | 3.1a | 正式事务前 `explore_desktop` | 发 `job.create(purpose=exploration)`；只允许只读 permission；completed 不进 waiting_acceptance |
-| 3.2 | job.create → needs_permission | phone 收到 job.needs_permission；权限请求入桌面队列 `[auto: e2e]` |
+| 3.2 | job.create → needs_permission | phone 收到 job.needs_permission；phone 本地 affair → delegated 且写入 currentJobId；控制面板显示 currentJobStatus=needs_permission；权限请求入桌面队列 `[auto: e2e]` |
 | 3.3 | 授权 allow_for_job | 自动委派 adapter → phone 收到 job.accepted `[auto: e2e]` |
 | 3.4 | worker 状态流 | progress → completed 依次推送；完成摘要无凭据 |
 | 3.5 | job.completed ≠ affair.closed | affair 只到 waiting_acceptance，绝不自动 closed `[auto: mock job-lifecycle]` |
@@ -49,7 +49,10 @@
 | 3.9 | 幂等重放 | 同 messageId/affairId/jobId 重复事件不二次委派/二次关闭；**并发同 jobId 仅一份 pending** `[auto: job-create-transaction.test]` |
 | 3.11 | 入站 identity | 伪造 source/target deviceId → `inbound_identity_mismatch` `[auto: inbound-guard.test]` |
 | 3.10 | 真实 gateway 执行 | 自托管实例内 agent run 真实完成；断网关时失败可诊断 |
-| 3.12 | 后台监督回电 | 通话结束后 active affair 转 background；job blocked/failed/completed 生成 `lanxin_claw_callback`；fire-time 复验 stale/terminal 后不外呼 |
+| 3.12 | 后台监督回电 | 通话结束后 active affair 转 background；job needs_permission 生成授权提醒回电，job blocked/failed/completed 生成状态回电；fire-time 复验 stale/terminal 后不外呼 |
+| 3.13 | OpenClaw 负证据映射 | browser/policy blocked、tool disabled、no provider、missing capability → job.blocked；terminal timeout/tool failed → job.failed；不得映射成 completed |
+| 3.14 | OpenClaw 终态缺业务结果 | `agent.wait ok/completed` 但只有 `stop/ok/done/endedAt` 等低信号时 → job.blocked(`openclaw.terminal_without_result`)，phone/UI 不得进入待验收 |
+| 3.15 | 桌面验收动作 | 任务页“接受结果”发 `affair.close(status=closed)`；“继续处理”发 `affair.resume` + context note；“让张老板回报”发 context note，不自动关闭 |
 
 ## 4. 权限
 
@@ -59,6 +62,7 @@
 | 4.2 | 权限范围 | workspaceHint 越界拒绝（workspace_scope_mismatch） |
 | 4.3 | 授权权威 | 决策只在 companion gate；renderer 不能自行授予 |
 | 4.4 | 审计 | 权限/配对/job 关键动作入审计，无凭据明文 |
+| 4.5 | 联网任务权限推断 | phone 创建新闻/搜索/网页任务时自动携带 `network.access`；不自动扩大到 `desktop.control` |
 
 ## 5. 聊天
 

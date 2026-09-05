@@ -49,6 +49,14 @@
         { "$ref": "#/$defs/currentAffairSummary" }
       ]
     },
+    "affairs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/currentAffairSummary" }
+    },
+    "recentActionDeliveries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bridgeActionDelivery" }
+    },
     "sideChannel": {
       "$ref": "#/$defs/sideChannel"
     }
@@ -200,8 +208,39 @@
         "currentJobId": {
           "type": ["string", "null"]
         },
+        "currentJobStatus": {
+          "type": ["string", "null"],
+          "enum": ["queued", "running", "needs_permission", "blocked", "completed", "failed", "canceled", null]
+        },
+        "currentJobGoal": {
+          "type": ["string", "null"]
+        },
+        "currentJobProgressSummary": {
+          "type": ["string", "null"]
+        },
+        "currentJobBlockedReason": {
+          "type": ["string", "null"]
+        },
+        "currentJobResumeCondition": {
+          "type": ["string", "null"]
+        },
+        "currentJobStatusReasonCode": {
+          "type": ["string", "null"]
+        },
+        "currentJobStatusObservedAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
         "executor": {
           "type": ["string", "null"]
+        },
+        "context": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         },
         "progressSummary": {
           "type": "string"
@@ -256,6 +295,43 @@
             },
             "additionalProperties": false
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "bridgeActionDelivery": {
+      "type": "object",
+      "required": ["actionReceiptId", "status", "affairId", "jobId", "deliveredAt", "reasonCode", "message"],
+      "properties": {
+        "actionReceiptId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "sent_to_phone",
+            "queued_until_session",
+            "rejected",
+            "applied_locally",
+            "waiting_for_callback"
+          ]
+        },
+        "affairId": {
+          "type": ["string", "null"]
+        },
+        "jobId": {
+          "type": ["string", "null"]
+        },
+        "deliveredAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "reasonCode": {
+          "type": ["string", "null"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false

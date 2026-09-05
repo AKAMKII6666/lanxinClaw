@@ -14,6 +14,8 @@ import type { ChatAttachTarget, ChatContentKind } from "../views.js";
 export interface PendingContextItem {
   /** 本地 id */
   pendingId: string;
+  /** 原 bridge action receipt id；旧数据可无 */
+  actionReceiptId?: string | null;
   /** 正文；untrusted */
   text: string;
   /** 内容种类 */
@@ -22,6 +24,8 @@ export interface PendingContextItem {
   target: ChatAttachTarget;
   /** 事务 id；affair 目标必填 */
   affairId: string | null;
+  /** 入队时绑定的 job id；旧数据可无 */
+  jobId?: string | null;
   /** 入队时间 */
   enqueuedAt: string;
 }
@@ -44,6 +48,8 @@ export class PendingContextQueue {
     contentKind: ChatContentKind;
     target: ChatAttachTarget;
     affairId: string | null;
+    actionReceiptId?: string | null;
+    jobId?: string | null;
     enqueuedAt?: string;
   }): { ok: true; item: PendingContextItem } | { ok: false; code: string; message: string } {
     const text = input.text.trim();
@@ -60,10 +66,12 @@ export class PendingContextQueue {
     this.#seq += 1;
     const item: PendingContextItem = {
       pendingId: `pending_ctx_${String(this.#seq).padStart(4, "0")}`,
+      actionReceiptId: input.actionReceiptId ?? null,
       text,
       contentKind: input.contentKind,
       target: input.target,
       affairId: input.affairId,
+      jobId: input.jobId ?? null,
       enqueuedAt: input.enqueuedAt ?? new Date().toISOString(),
     };
     this.#items.push(item);

@@ -12,7 +12,7 @@ export const AFFAIR_STATUS_LABEL: Record<string, string> = {
   ready: "就绪",
   delegated: "已委派",
   running: "运行中",
-  blocked: "blocked",
+  blocked: "已阻塞",
   paused: "已暂停",
   waiting_acceptance: "待验收",
   closed: "已关闭",
@@ -23,9 +23,10 @@ export const AFFAIR_STATUS_LABEL: Record<string, string> = {
 export const JOB_STATUS_LABEL: Record<string, string> = {
   queued: "排队中",
   running: "运行中",
-  blocked: "blocked",
+  needs_permission: "等待授权",
+  blocked: "已阻塞",
   paused: "已暂停",
-  completed: "worker 已完成",
+  completed: "执行已结束",
   failed: "失败",
   canceled: "已取消",
 };

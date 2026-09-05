@@ -23,6 +23,23 @@ export function readString(raw: Record<string, unknown>, keys: readonly string[]
 }
 
 /**
+ * 宽松读取文本字段；支持 string、对象 text/content 与 content parts 数组。
+ *
+ * @param raw 对象
+ * @param keys 候选键
+ * @returns 合并后的文本或 null
+ */
+export function readTextLike(raw: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const text = textFromUnknown(raw[key], 0);
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+/**
  * 读取字符串数组字段。
  *
  * @param raw 对象
@@ -111,4 +128,34 @@ export function readRecordArray(raw: Record<string, unknown>, keys: readonly str
     return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
   }
   return [];
+}
+
+function textFromUnknown(value: unknown, depth: number): string | null {
+  if (depth > 4 || value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (Array.isArray(value)) {
+    const text = value
+      .map((item) => textFromUnknown(item, depth + 1))
+      .filter((item): item is string => Boolean(item))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return text || null;
+  }
+  if (typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of ["text", "content", "message", "summary", "output", "value", "parts"] as const) {
+    const text = textFromUnknown(record[key], depth + 1);
+    if (text) {
+      return text;
+    }
+  }
+  return null;
 }

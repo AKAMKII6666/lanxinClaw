@@ -33,6 +33,8 @@ const AFFAIR_ID_ACTION_TYPES = new Set<string>([
   "affair.pause",
   "affair.resume",
   "affair.cancel",
+  "affair.accept",
+  "affair.requestRevision",
   "affair.requestAcceptance",
 ]);
 

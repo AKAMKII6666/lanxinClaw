@@ -66,7 +66,7 @@ function buildRequest(
     reason: payload.goal,
     risk: riskForPermissions(requestedPermissions),
     proposedScope: { ...(payload.workspaceHint ? { workspaceRoot: payload.workspaceHint } : {}) },
-    denyConsequence: "job 将停在 needs_permission，不会委派 OpenClaw 执行",
+    denyConsequence: "拒绝授权会让该 job 失败，但不等于删除整件事务。",
     requestedAt: new Date().toISOString(),
     expiresAt: null,
   };

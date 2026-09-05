@@ -26,6 +26,7 @@
 
 | 来源 | 内容 |
 |------|------|
+| `job.needs_permission` | 已把任务请求发到电脑端，但仍需用户在桌面授权 |
 | `job.progress` | 正在做什么，最近看到什么进展 |
 | `job.blocked` | 为什么卡住，需要用户做什么 |
 | `job.failed` | 当前尝试为什么失败，是否可重试 |
@@ -50,13 +51,14 @@
 
 | Lanxin 状态 | 张老板口径 | UI 口径 |
 |-------------|------------|---------|
+| `needs_permission` | “我已经把任务发到电脑端了，现在等你在电脑上授权。” | 等待授权，不显示执行中 |
 | `running` | “我正在处理，刚刚进行到……” | 进行中，显示最近进度 |
 | `blocked` | “这一步卡住了，需要你……” | 阻塞，显示原因和恢复条件 |
 | `failed` | “这次尝试没成功，原因是……” | 失败，显示安全错误摘要 |
 | `canceled` | “这件事我已经停下来了。” | 已取消 |
-| `completed` | “我这边做完了，你看这样是否可以。” | worker 已完成，等待验收 |
+| `completed` | “我这边做完了一版结果，你看这样是否可以。” | 执行已结束，等待验收 |
 
-`completed` 的措辞必须是“我这边做完了/worker 已完成”，不能说“事务已关闭”。只有用户验收后才说“这件事结束了”。
+`completed` 的措辞必须表达“电脑端产出了一版结果，等待确认”，不能说“事务已关闭”。只有用户验收后才说“这件事结束了”。
 
 ## 4. 失败原因映射
 
@@ -70,11 +72,13 @@
 | terminal timeout | `failed` | “这次执行超时了，可以缩小范围或重试。” |
 | wait-only timeout | `running` | “我还没等到最终结果，会继续盯着。” |
 | run ok + final negative | `blocked` | “OpenClaw 回报说它没法按原方案完成。” |
+| run ok/completed 但只有 `stop/ok/done` | `blocked` | “电脑端这轮停了，但没有拿到可验收结果，需要我复验或换个办法。” |
 
 ## 5. 通话中回报
 
 通话仍在时：
 
+- 收到 `job.needs_permission` 或 `companion.create_job` 返回 `needs_permission`，只能说明“任务请求已发送，等待电脑端授权”，不能说“已经开始执行”。
 - 收到 `job.progress` 可短句插入，不打断用户主要表达。
 - 收到 `job.blocked` 必须尽快说明，并请求用户选择下一步。
 - 收到 `job.failed` 必须说明失败，不继续假装执行中。
@@ -84,11 +88,13 @@
 
 | 场景 | 模板 |
 |------|------|
+| 等待授权 | “我已经把这件事发到电脑端了，现在需要你在电脑上授权，授权后我再继续盯。” |
 | policy blocked | “我试了，电脑端这一步被策略拦住了：{reason}。你要我换个方式继续，还是先停一下？” |
 | 缺权限 | “这一步需要你在电脑上授权 {permission}，授权后我才能继续。” |
 | 工具失败 | “这次工具执行失败了：{summary}。我可以换一种办法再试。” |
 | wait-only timeout | “我这边还没等到最终结果，会继续盯着，不先算完成。” |
-| worker completed | “我这边已经做完一版：{summary}。你看看这样算不算可以？” |
+| completed with result | “我这边已经做完一版：{summary}。你看看这样算不算可以？” |
+| terminal without result | “电脑端这轮停了，但没给出可验收结果。你要我换个办法继续，还是先停一下？” |
 
 ## 6. 后台回电
 
@@ -96,6 +102,7 @@
 
 触发回电的状态：
 
+- execution job `needs_permission`，用于提醒用户授权；回电前必须复验仍在等待授权
 - execution job `blocked`
 - execution job `failed`
 - execution job `completed`
@@ -120,6 +127,7 @@
 
 | 状态 | 开场 |
 |------|------|
+| `needs_permission` | “刚才那件事还在等你电脑端授权，我回来说一下。” |
 | `blocked` | “刚才那件事卡住了，我回来说一下原因。” |
 | `failed` | “刚才那次电脑执行没成功，我回报一下。” |
 | `completed` | “刚才交代的事我这边做完一版了，需要你确认一下。” |
@@ -128,7 +136,8 @@
 
 控制面板展示要避免假成功：
 
-- `job.completed` 标签显示“worker 已完成”。
+- `job.completed` 标签显示“执行已结束”，同时明确事务仍待验收。
+- `job.needs_permission` 标签显示“等待电脑端授权”，不得合并成 running。
 - affair `waiting_acceptance` 标签显示“待验收”。
 - `job.blocked` 显示 `blockedReason` 和 `resumeCondition`。
 - `job.failed` 显示最近失败摘要和可重试提示。
@@ -162,7 +171,10 @@
 ## 9. 验收标准
 
 - 任意失败/阻塞都能进入 `job.blocked` 或 `job.failed`。
+- `needs_permission` 能在 phone 与 UI 中显示为等待授权，并可在通话后进入回电提醒。
 - `agent.wait ok` 不会直接导致“已完成”文案。
+- `agent.wait ok` 只有在同时携带可验收业务结果证据时才会进入 `job.completed`。
+- `agent.wait ok/completed` 但只有 `stop/ok/done/endedAt` 时进入 `job.blocked`，不得进入待验收。
 - 通话中能回报最新状态。
 - 挂机后 blocked/failed/completed 能进入回电闭环。
 - 控制面板与 phone 看到的状态一致。

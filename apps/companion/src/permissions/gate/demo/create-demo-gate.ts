@@ -25,7 +25,7 @@ export function createDemoPermissionGate(): PermissionGate {
     reason: "当前 job 需要修复测试失败并写入项目文件",
     risk: "medium",
     proposedScope: { workspaceRoot: "F:/workspace/xxx" },
-    denyConsequence: "本 job 将停在 needs_permission，不会修改该目录",
+    denyConsequence: "拒绝授权会让该 job 失败，但不等于删除整件事务。",
     requestedAt: "2026-07-23T00:58:00.000Z",
     expiresAt: null,
   };

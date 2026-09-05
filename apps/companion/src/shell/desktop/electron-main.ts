@@ -19,10 +19,7 @@ import { confirmQuit } from "./quit-confirm.js";
 import type { ElectronRuntime, StartCompanionShellOptions } from "./electron-runtime.js";
 import { createSecretsFromSafeStorage } from "./safe-storage-secrets.js";
 import { buildResidentTrayExtraItems, showDesktopNotification } from "./resident-tray-menu.js";
-import {
-  buildGatewayDiagnosticsInput,
-  buildGatewaySnapshotExtras,
-} from "./panel-runtime-extras.js";
+import { buildGatewayDiagnosticsInput, buildGatewaySnapshotExtras } from "./panel-runtime-extras.js";
 import { createCompanionBackendRuntime } from "../../backend/runtime.js";
 import { createFileAuditStore } from "../../audit/file-store.js";
 import { FileIdentityPersistence } from "../../credentials/persistence/file-identity-persistence.js";
@@ -39,12 +36,8 @@ import { createFilePermissionGateStore } from "../../permissions/gate/file-store
 import { PermissionGate } from "../../permissions/gate/permission-gate.js";
 import { flushPendingContext } from "../../protocol-server/bridge-actions.js";
 import { runShellBridgeAction } from "./bridge-outbound.js";
-import {
-  createDeviceRevokePairingHandler,
-  createShellJobDelegator,
-  restoreShellInFlightJobs,
-  startShellLanDiscovery,
-} from "./runtime-wiring.js";
+import { createDeviceRevokePairingHandler, createShellJobDelegator, restoreShellInFlightJobs, startShellLanDiscovery } from "./runtime-wiring.js";
+import { createActivePairedPhoneIdsReader, createLanDiscoveryPairingRefresher } from "./pairing-discovery-refresh.js";
 import { parseProtocolListenHost, type ProtocolListenHost } from "../session/listen-host.js";
 import { JsonFilePersistence } from "../../persistence/json-file.js";
 import type { LoginItemSettingsPort } from "../session/autostart.js";
@@ -129,6 +122,7 @@ export async function startCompanionDesktopShell(
     });
   let approvePairing: ((pairingId: string) => Promise<void>) | null = null;
   let protocolHandle: Awaited<ReturnType<typeof startCompanionProtocolServer>> | null = null;
+  let lanDiscoveryHandle: Awaited<ReturnType<typeof startShellLanDiscovery>> = null;
   let delegator: JobDelegator | null = null;
   let allowWindowClose = false;
   const diagnosticsState = {
@@ -257,6 +251,11 @@ export async function startCompanionDesktopShell(
         )
       : new MemoryIdentityPersistence(),
   );
+  const getActivePairedPhoneIds = createActivePairedPhoneIdsReader({ identityStore, desktopDeviceId });
+  const refreshLanDiscoveryPairings = createLanDiscoveryPairingRefresher({
+    getHandle: () => lanDiscoveryHandle,
+    logger: shellLogger,
+  });
   const backend = createCompanionBackendRuntime({
     permissionGate,
     desktopDeviceId,
@@ -294,6 +293,7 @@ export async function startCompanionDesktopShell(
       getPairingId: () => backend.getState().connection.pairingId ?? null,
       getDelegator: () => delegator,
       getJobAffairId: (jobId) => backend.getState().jobs.get(jobId)?.affairId ?? "",
+      onPairingChanged: refreshLanDiscoveryPairings,
     }),
     onBridgeAction: (action, result) =>
       runShellBridgeAction(
@@ -363,6 +363,7 @@ export async function startCompanionDesktopShell(
     };
     protocolHandle = await startCompanionProtocolServer({
       ...protocolOptions,
+      logger: logRegistry.getLogger("protocol"),
       onJobCancel: (input) => (delegator ? delegator.cancelJob(input) : Promise.resolve()),
       onSessionAccepted: () => {
         flushPendingContext({
@@ -375,19 +376,25 @@ export async function startCompanionDesktopShell(
           getAffair: (affairId) => backend.getState().affairs.get(affairId),
           broadcast: (envelope) => protocolHandle?.broadcast(envelope),
           pendingContext: backend.getPendingContext(),
+          recordActionDelivery: (delivery) => backend.recordBridgeActionDelivery(delivery),
         });
       },
     });
     diagnosticsState.protocolServerReady = true;
-    approvePairing = protocolHandle.approvePairing;
+    const approvePairingWithDiscoveryRefresh = protocolHandle.approvePairing;
+    approvePairing = async (pairingId) => {
+      await approvePairingWithDiscoveryRefresh(pairingId);
+      await refreshLanDiscoveryPairings();
+    };
 
     restoreShellInFlightJobs(delegator, backend, adapter);
 
-    await startShellLanDiscovery({
+    lanDiscoveryHandle = await startShellLanDiscovery({
       enabled: options.discovery?.enabled !== false,
       protocolPort: protocolHandle.port,
       desktopDeviceId,
-      logger: shellLogger,
+      getPairedPhoneIds: getActivePairedPhoneIds,
+      logger: logRegistry.getLogger("discovery"),
       onResult: (result) => {
         diagnosticsState.lanDiscoveryReady = result.lanDiscoveryReady;
         if (result.recentServerErrorCode) {
@@ -440,6 +447,7 @@ export async function startCompanionDesktopShell(
         allowWindowClose = true;
         backend.stopSupervision();
         delegator?.stop();
+        await lanDiscoveryHandle?.stop();
         await protocolHandle?.close();
         await gatewayService?.stop();
         electron.app.quit();

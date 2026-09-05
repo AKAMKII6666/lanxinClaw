@@ -18,11 +18,11 @@ export type TaskOutcome = "running" | "blocked" | "failed" | "completed" | null;
 
 /** 需要用户或策略介入的文本线索。 */
 const BLOCKING_TEXT_PATTERN =
-  /(policy|permission|approval|not allowed|denied|blocked|cannot|can't|unable|requires user|need user|unauthorized|forbidden|受限|阻止|阻塞|权限|授权|不允许|无法|不能|需要用户|需要你|拒绝)/i;
+  /(policy|permission|approval|not allowed|denied|blocked|disabled|no provider|unavailable|not configured|missing provider|cannot|can't|unable|requires user|need user|unauthorized|forbidden|受限|阻止|阻塞|权限|授权|不可用|未配置|不允许|无法|不能|需要用户|需要你|拒绝)/i;
 
 /** 失败/未完成的最终回复线索。 */
 const NEGATIVE_FINAL_REPLY_PATTERN =
-  /(cannot complete|can't complete|unable to complete|could not complete|not completed|failed to|blocked by|policy|permission|无法完成|无法|不能|没能完成|没有完成|执行失败|受限|策略限制|被阻止|需要你|需要用户|没有权限|缺少权限)/i;
+  /(cannot complete|can't complete|unable to complete|could not complete|not completed|failed to|blocked by|policy (blocked|block|restriction|restricted|denied|forbidden|not allowed)|permission (required|needed|denied|missing|blocked|not granted)|requires (user )?(permission|approval)|needs (user )?(permission|approval)|without permission|no permission|disabled|no provider|unavailable|not configured|无法完成|无法|不能|没能完成|没有完成|执行失败|受限|策略限制|被阻止|不可用|未配置|需要你|需要用户|没有权限|缺少权限)/i;
 
 /**
  * 归一化 evidence 中的 OpenClaw run 状态。

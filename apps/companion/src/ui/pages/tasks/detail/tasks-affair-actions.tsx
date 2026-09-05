@@ -20,12 +20,14 @@ export function TasksAffairActions(props: {
   onPause: (affairId: string) => void;
   onResume: (affairId: string) => void;
   onCancel: (affairId: string) => void;
+  onAccept: (affairId: string) => void;
+  onRequestRevision: (affairId: string) => void;
   onRequestAcceptance: (affairId: string) => void;
 }): ReactElement {
   const isBlocked = props.status === "blocked";
   const isWaitingAcceptance = props.status === "waiting_acceptance";
   const isRunning = props.status === "running" || props.status === "delegated";
-  const canCancel = !isWaitingAcceptance && props.status !== "closed" && props.status !== "canceled";
+  const canCancel = props.status !== "closed" && props.status !== "canceled";
 
   return (
     <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
@@ -36,7 +38,17 @@ export function TasksAffairActions(props: {
       ) : null}
       {isBlocked || props.status === "paused" ? (
         <Button size="small" variant="outlined" onClick={() => props.onResume(props.affairId)}>
-          恢复
+          继续处理
+        </Button>
+      ) : null}
+      {isWaitingAcceptance ? (
+        <Button size="small" variant="contained" onClick={() => props.onAccept(props.affairId)}>
+          接受结果
+        </Button>
+      ) : null}
+      {isWaitingAcceptance ? (
+        <Button size="small" variant="outlined" onClick={() => props.onRequestRevision(props.affairId)}>
+          继续处理
         </Button>
       ) : null}
       {canCancel ? (
@@ -46,16 +58,16 @@ export function TasksAffairActions(props: {
           variant="outlined"
           onClick={() => props.onCancel(props.affairId)}
         >
-          取消
+          取消事务
         </Button>
       ) : null}
-      {isRunning || isWaitingAcceptance ? (
+      {isWaitingAcceptance ? (
         <Button
           size="small"
-          variant="contained"
+          variant="outlined"
           onClick={() => props.onRequestAcceptance(props.affairId)}
         >
-          请求验收
+          让张老板回报
         </Button>
       ) : null}
     </Stack>

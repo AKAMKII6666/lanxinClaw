@@ -14,6 +14,7 @@ import type {
 } from "@lanxin-claw/protocol";
 import type { PendingContextItem } from "../../chat/channel/pending-context.js";
 import { JsonFilePersistence } from "../../persistence/json-file.js";
+import type { BridgeActionDelivery } from "../../bridge/contract.js";
 import type { CompanionBackendState } from "../types.js";
 
 /** 落盘根 */
@@ -30,6 +31,8 @@ interface BackendMirrorRoot {
   contextAttachments: ChatContextAttachPayload[];
   /** pending 精确文本 */
   pendingContext: PendingContextItem[];
+  /** 最近 UI action 投递回执 */
+  bridgeActionDeliveries?: BridgeActionDelivery[];
 }
 
 /**
@@ -54,6 +57,7 @@ export function createFileBackendMirrorStore(filePath: string): BackendMirrorSto
     chatMessages: [],
     contextAttachments: [],
     pendingContext: [],
+    bridgeActionDeliveries: [],
   });
   return {
     load: () => persistence.load(),
@@ -79,6 +83,7 @@ export function snapshotBackendMirror(
     chatMessages: [...state.chatMessages],
     contextAttachments: [...state.contextAttachments],
     pendingContext: pendingContext.map((item) => ({ ...item })),
+    bridgeActionDeliveries: state.bridgeActionDeliveries.map((item) => ({ ...item })),
   };
 }
 
@@ -102,5 +107,10 @@ export function hydrateBackendMirror(state: CompanionBackendState, root: Backend
     0,
     state.contextAttachments.length,
     ...(root.contextAttachments ?? []),
+  );
+  state.bridgeActionDeliveries.splice(
+    0,
+    state.bridgeActionDeliveries.length,
+    ...(root.bridgeActionDeliveries ?? []),
   );
 }

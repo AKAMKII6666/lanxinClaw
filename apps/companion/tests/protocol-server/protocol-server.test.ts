@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import WebSocket from "ws";
+import type { Logger } from "pino";
 import {
   PROTOCOL_VERSION,
   createEnvelope,
@@ -21,7 +22,76 @@ import {
   waitFor,
 } from "./harness.js";
 
+function createCaptureLogger(): {
+  logger: Logger;
+  entries: Array<{ level: string; meta: Record<string, unknown>; message: string }>;
+} {
+  const entries: Array<{ level: string; meta: Record<string, unknown>; message: string }> = [];
+  const push = (level: string, meta: Record<string, unknown>, message: string): void => {
+    entries.push({ level, meta, message });
+  };
+  return {
+    entries,
+    logger: {
+      info: (meta: Record<string, unknown>, message: string) => push("info", meta, message),
+      warn: (meta: Record<string, unknown>, message: string) => push("warn", meta, message),
+      error: (meta: Record<string, unknown>, message: string) => push("error", meta, message),
+    } as unknown as Logger,
+  };
+}
+
 describe("companion protocol server", () => {
+  it("session.open 入站日志落 redacted DTO", { timeout: 5000 }, async () => {
+    const captured = createCaptureLogger();
+    const { server, socket, identityStore } = await startHarness({ logger: captured.logger });
+    const reader = createJsonReader(socket);
+    try {
+      const identity = await identityStore.savePairedIdentity({
+        pairingId: "pair_log_001",
+        phoneDeviceId: "phone_log_001",
+        phoneDisplayName: "phone",
+        desktopDeviceId: "desktop_srv_001",
+        desktopDisplayName: "desktop",
+        pairedAt: new Date().toISOString(),
+      });
+      const sessionId = "sess_log_001";
+      socket.send(JSON.stringify(createEnvelope({
+        source: { kind: "phone", deviceId: "phone_log_001" },
+        target: { kind: "companion", deviceId: "desktop_srv_001" },
+        type: "session.open",
+        payload: {
+          sessionId,
+          phoneDeviceId: "phone_log_001",
+          desktopDeviceId: "desktop_srv_001",
+          authProof: createSessionAuthProof(identity.pairingSecret ?? "", sessionId),
+          protocolVersion: PROTOCOL_VERSION,
+        },
+      })));
+      await reader.nextEnvelope("session.accepted");
+      await waitFor(() =>
+        captured.entries.some((entry) => {
+          const meta = entry.meta as {
+            event?: string;
+            dto?: { type?: string; payload?: { authProof?: string } };
+          };
+          return meta.event === "protocol.inbound.dto" && meta.dto?.type === "session.open";
+        }),
+      );
+      const inbound = captured.entries.find((entry) => {
+        const meta = entry.meta as {
+          event?: string;
+          dto?: { type?: string; payload?: { authProof?: string } };
+        };
+        return meta.event === "protocol.inbound.dto" && meta.dto?.type === "session.open";
+      });
+      const dto = inbound?.meta.dto as { payload?: { authProof?: string } } | undefined;
+      assert.equal(dto?.payload?.authProof, "[redacted]");
+    } finally {
+      socket.close();
+      await server.close();
+    }
+  });
+
   it("空 allowedPermissions 被拒绝且不入队", { timeout: 5000 }, async () => {
     const { server, socket, backend, identityStore } = await startHarness();
     const reader = createJsonReader(socket);
@@ -287,6 +357,22 @@ describe("companion protocol server", () => {
       assert.equal(backend.getState().connection.sessionAuthenticated, true);
     } finally {
       socket.close();
+      await server.close();
+    }
+  });
+
+  it("认证 socket 关闭后立即标记 session 失联", { timeout: 5000 }, async () => {
+    const { server, socket, backend, identityStore } = await startHarness();
+    const reader = createJsonReader(socket);
+    try {
+      await openSession(socket, reader, identityStore);
+      assert.equal(backend.getState().connection.sessionAuthenticated, true);
+
+      socket.close();
+      await waitFor(() => !backend.getState().connection.sessionAuthenticated);
+
+      assert.equal(backend.getState().lastError?.code, "connection_lost");
+    } finally {
       await server.close();
     }
   });

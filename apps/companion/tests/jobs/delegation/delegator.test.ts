@@ -25,6 +25,7 @@ function createHarness(pollIntervalMs = 30) {
   const broadcasts: ProtocolEnvelope[] = [];
   const jobStatuses = new Map<string, string>();
   const affairStatuses = new Map<string, string>();
+  const affairCurrentJobIds = new Map<string, string | null>();
   const workspaceHints = new Map<string, string | null>();
   const delegator = new JobDelegator({
     adapter,
@@ -33,16 +34,17 @@ function createHarness(pollIntervalMs = 30) {
     getWorkspaceHint: (jobId) =>
       workspaceHints.has(jobId) ? workspaceHints.get(jobId) : "F:/ws",
     getAffair: (affairId) =>
-      affairStatuses.has(affairId)
-        ? ({
-            affairId,
-            title: "test affair",
-            ownerAgent: "zhang-boss",
-            status: affairStatuses.get(affairId) as string,
-            context: [],
-            acceptanceCriteria: [],
-          } as never)
-        : undefined,
+      ({
+        affairId,
+        title: "test affair",
+        ownerAgent: "zhang-boss",
+        status: (affairStatuses.get(affairId) ?? "running") as string,
+        context: [],
+        acceptanceCriteria: [],
+        currentJobId: affairCurrentJobIds.has(affairId)
+          ? affairCurrentJobIds.get(affairId)
+          : gate.dump().requests.find((request) => request.affairId === affairId)?.jobId ?? null,
+      } as never),
     getPhoneDeviceId: () => "phone_test_001",
     desktopDeviceId: "desktop_test_001",
     applyProtocolEnvelope: (envelope) => {
@@ -57,7 +59,7 @@ function createHarness(pollIntervalMs = 30) {
     },
     pollIntervalMs,
   });
-  return { gate, runtime, adapter, broadcasts, jobStatuses, affairStatuses, workspaceHints, delegator };
+  return { gate, runtime, adapter, broadcasts, jobStatuses, affairStatuses, affairCurrentJobIds, workspaceHints, delegator };
 }
 
 /**
@@ -290,7 +292,7 @@ test("状态变化回推：completed → job.completed，终态停轮询", async
   runtime.advance({
     runId: runId ?? "",
     status: "completed",
-    patch: { summary: "done" },
+    patch: { summary: "任务结果已整理完成" },
   });
   affairStatuses.set("affair_test_001", "waiting_acceptance");
 
@@ -475,6 +477,57 @@ test("job 不在 needs_permission 时跳过委派", async () => {
   await delegator.handlePermissionGranted("pr_test_005");
   assert.equal(delegator.activeJobCount(), 0);
   assert.equal(broadcasts.length, 0);
+});
+
+test("父事务已终态时 handlePermissionGranted 不 createRun", async () => {
+  const { gate, broadcasts, jobStatuses, affairStatuses, adapter, delegator } = createHarness();
+  jobStatuses.set("job_terminal_parent", "needs_permission");
+  affairStatuses.set("affair_test_001", "canceled");
+  enqueueAndDecide(gate, "pr_terminal_parent", "job_terminal_parent", "allow_for_job");
+  await delegator.handlePermissionGranted("pr_terminal_parent");
+  assert.equal(delegator.activeJobCount(), 0);
+  assert.equal(broadcasts.length, 0);
+  const read = await adapter.readJob("job_terminal_parent");
+  assert.equal(read.ok, false);
+});
+
+test("权限请求不属于当前 job 时 handlePermissionGranted 不 createRun", async () => {
+  const { gate, broadcasts, jobStatuses, affairStatuses, affairCurrentJobIds, adapter, delegator } = createHarness();
+  jobStatuses.set("job_old_permission", "needs_permission");
+  affairStatuses.set("affair_test_001", "running");
+  affairCurrentJobIds.set("affair_test_001", "job_current_permission");
+  gate.enqueue({
+    permissionRequestId: "pr_old_permission",
+    jobId: "job_old_permission",
+    affairId: "affair_test_001",
+    requester: "zhang-boss",
+    requestedPermissions: ["workspace.read"],
+    reason: "test goal",
+    risk: "low",
+    proposedScope: { workspaceRoot: "F:/ws" },
+    denyConsequence: "job 停住",
+    requestedAt: new Date().toISOString(),
+    expiresAt: null,
+  });
+  gate.decide("pr_old_permission", "allow_for_job");
+  await delegator.handlePermissionGranted("pr_old_permission");
+  assert.equal(delegator.activeJobCount(), 0);
+  assert.equal(broadcasts.length, 0);
+  const read = await adapter.readJob("job_old_permission");
+  assert.equal(read.ok, false);
+});
+
+test("父事务没有 currentJobId 时 handlePermissionGranted 不 createRun", async () => {
+  const { gate, broadcasts, jobStatuses, affairStatuses, affairCurrentJobIds, adapter, delegator } = createHarness();
+  jobStatuses.set("job_without_current", "needs_permission");
+  affairStatuses.set("affair_test_001", "running");
+  affairCurrentJobIds.set("affair_test_001", null);
+  enqueueAndDecide(gate, "pr_without_current", "job_without_current", "allow_for_job");
+  await delegator.handlePermissionGranted("pr_without_current");
+  assert.equal(delegator.activeJobCount(), 0);
+  assert.equal(broadcasts.length, 0);
+  const read = await adapter.readJob("job_without_current");
+  assert.equal(read.ok, false);
 });
 
 test("cancelJob：取消 adapter run、广播 canceled、停轮询", async () => {

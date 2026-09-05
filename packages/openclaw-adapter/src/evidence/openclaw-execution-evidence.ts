@@ -19,6 +19,7 @@ export type OpenClawEvidenceKind =
   | "wait.failed"
   | "wait.timeout"
   | "wait.waiting_approval"
+  | "wait.ended_without_result"
   | "audit.blocked"
   | "audit.failed"
   | "audit.completed"

@@ -46,6 +46,7 @@ const JOB_KEYS = [
   "blockedReason",
   "resumeCondition",
   "permissionRequestId",
+  "taskIntentId",
   "statusReasonCode",
   "statusObservedAt",
 ] as const;
@@ -239,6 +240,7 @@ function mergeJobOptionals(
     "blockedReason",
     "resumeCondition",
     "permissionRequestId",
+    "taskIntentId",
     "statusReasonCode",
   ] as const) {
     const err = assignOptionalStringOrNull(obj, key, payload);

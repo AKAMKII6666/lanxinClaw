@@ -151,6 +151,7 @@ export function createDemoTaskWorkspace(): TaskWorkspaceView {
     affairs: [
       {
         affairId: "affair_fix_code_001",
+        groupLabel: "处理中",
         title: "修好 xxx 项目代码问题",
         status: "running",
         progressSummary: "已定位失败用例，正在尝试修复",
@@ -159,6 +160,7 @@ export function createDemoTaskWorkspace(): TaskWorkspaceView {
       },
       {
         affairId: "affair_python_env_001",
+        groupLabel: "处理中",
         title: "配置 Python 环境",
         status: "blocked",
         progressSummary: "网络不可用",
@@ -167,6 +169,7 @@ export function createDemoTaskWorkspace(): TaskWorkspaceView {
       },
       {
         affairId: "affair_docs_review_001",
+        groupLabel: "处理中",
         title: "整理 README 验收稿",
         status: "waiting_acceptance",
         progressSummary: "等待用户验收；非已关闭",
