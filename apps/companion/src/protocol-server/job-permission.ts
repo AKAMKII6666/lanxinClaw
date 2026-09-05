@@ -8,11 +8,14 @@
 
 import {
   createPermissionRequestId,
+  PERMISSION_IDS,
   type JobPayload,
   type PermissionId,
   type ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
 import type { CompanionProtocolServerOptions } from "./server.js";
+
+const KNOWN_PERMISSION_ID_SET = new Set<string>(PERMISSION_IDS);
 
 /**
  * job.create 先入队 permission gate。
@@ -24,16 +27,11 @@ export function enqueueJobPermission(
   | { ok: true; permissionRequestId: string; request: ReturnType<typeof buildRequest> }
   | { ok: false; code: string; message: string; retryable: false } {
   const payload = envelope.payload as unknown as JobPayload;
-  const requestedPermissions = normalizePermissions(payload.allowedPermissions ?? []);
-  if (requestedPermissions.length === 0) {
-    return {
-      ok: false,
-      code: "job_permissions_required",
-      message: "job.create 必须声明至少一个已知 allowedPermissions，空列表不得委派",
-      retryable: false,
-    };
+  const validated = validatePermissions(payload.allowedPermissions ?? []);
+  if (!validated.ok) {
+    return validated;
   }
-  const request = buildRequest(payload, requestedPermissions);
+  const request = buildRequest(payload, validated.permissions);
   const enqueued = options.backend.getPermissionGate().enqueue(request);
   if (enqueued.ok) {
     return { ok: true, permissionRequestId: request.permissionRequestId, request };
@@ -73,21 +71,46 @@ function buildRequest(
 }
 
 /**
- * 过滤权限 id。
+ * 校验权限 id：含任一未知 id 即整单拒绝，不静默 strip。
+ *
+ * @param permissions 原始声明
+ * @returns 合法权限或错误
  */
-function normalizePermissions(permissions: readonly string[]): PermissionId[] {
-  return permissions.filter((item): item is PermissionId =>
-    [
-      "workspace.read",
-      "workspace.write",
-      "command.run",
-      "network.access",
-      "git.read",
-      "git.write",
-      "secrets.read",
-      "desktop.control",
-    ].includes(item),
-  );
+export function validatePermissions(permissions: readonly string[]):
+  | { ok: true; permissions: PermissionId[] }
+  | { ok: false; code: string; message: string; retryable: false } {
+  const seen = new Set<string>();
+  const known: PermissionId[] = [];
+  const unknown: string[] = [];
+  for (const item of permissions) {
+    const text = String(item || "").trim();
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+    if (KNOWN_PERMISSION_ID_SET.has(text)) {
+      known.push(text as PermissionId);
+    } else {
+      unknown.push(text);
+    }
+  }
+  if (unknown.length > 0) {
+    return {
+      ok: false,
+      code: "unknown_permission_ids",
+      message: `job.create 含未知 allowedPermissions：${unknown.join(", ")}；未知 id 不得静默丢弃后继续`,
+      retryable: false,
+    };
+  }
+  if (known.length === 0) {
+    return {
+      ok: false,
+      code: "job_permissions_required",
+      message: "job.create 必须声明至少一个已知 allowedPermissions，空列表不得委派",
+      retryable: false,
+    };
+  }
+  return { ok: true, permissions: known };
 }
 
 /**

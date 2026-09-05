@@ -591,7 +591,7 @@ describe("companion protocol server", () => {
       })));
       const msg = await reader.next("unknown permissions");
       assert.equal(msg.ok, false);
-      assert.equal(msg.error.code, "job_permissions_required");
+      assert.equal(msg.error.code, "unknown_permission_ids");
       assert.equal(backend.getState().jobs.has("job_unknown_perm"), false);
     } finally {
       socket.close();

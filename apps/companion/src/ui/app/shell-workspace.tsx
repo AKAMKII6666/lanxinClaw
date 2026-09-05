@@ -1,5 +1,5 @@
 /**
- * 主工作区：AppBar + 侧栏 + 主页面 + 配对弹窗。
+ * 主工作区：AppBar + 侧栏 + 主页面 + 配对弹窗 + 全局授权弹窗。
  *
  * 职责：布局已启动的主壳，并把导航意图同步到 bridge。
  * 不拥有：配置门、冷启动、权限裁决。
@@ -15,6 +15,7 @@ import type { ReactElement } from "react";
 import type { BridgeNavPage } from "../../bridge/contract.js";
 import type { PendingPairingRequestView } from "../../pairing/views/pending-request-view.js";
 import { FirstPairingDialog } from "../dialogs/pairing/first-pairing-dialog.js";
+import { PermissionRequestModalHost } from "../dialogs/permissions/permission-request-modal-host.js";
 import type { RendererBridgeApi } from "../bridge/renderer-api.js";
 import { ShellMainPages } from "./shell-main-pages.js";
 import type { PairingUiAction } from "./shell-pairing.js";
@@ -89,6 +90,7 @@ export function ShellWorkspace(props: {
         onReject={(pairingId) => onPairingAction({ type: "pairing.reject", pairingId })}
         onRescan={() => onPairingAction({ type: "pairing.rescan" })}
       />
+      <PermissionRequestModalHost bridge={bridge} />
     </>
   );
 }

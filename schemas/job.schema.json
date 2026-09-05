@@ -32,7 +32,7 @@
     "allowedPermissions": {
       "type": "array",
       "items": {
-        "type": "string"
+        "$ref": "permission.schema.json#/$defs/permissionId"
       }
     },
     "progressSummary": {
