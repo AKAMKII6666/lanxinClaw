@@ -8,7 +8,14 @@
 
 import { AFFAIR_STATUSES } from "../../../states/affair-status.js";
 import { JOB_STATUSES } from "../../../states/job-status.js";
-import type { AffairPayload, JobPayload } from "../../../messages/payloads/core.js";
+import {
+  JOB_EVIDENCE_QUALITIES,
+  JOB_RECENT_STEP_KINDS,
+  type AffairPayload,
+  type JobEvidenceQuality,
+  type JobPayload,
+  type JobRecentStep,
+} from "../../../messages/payloads/core.js";
 import {
   expectDateTime,
   expectEnum,
@@ -20,6 +27,7 @@ import {
   rejectUnknownKeys,
 } from "../../primitives.js";
 import type { ValidateErr, ValidateResult } from "../../result.js";
+import { validationFailed } from "../../../errors/protocol-error.js";
 
 const AFFAIR_KEYS = [
   "affairId",
@@ -43,6 +51,9 @@ const JOB_KEYS = [
   "workspaceHint",
   "allowedPermissions",
   "progressSummary",
+  "recentSteps",
+  "resultDigest",
+  "evidenceQuality",
   "blockedReason",
   "resumeCondition",
   "permissionRequestId",
@@ -205,6 +216,49 @@ function readJobRequired(
 }
 
 /**
+ * 校验 recentSteps 数组。
+ *
+ * @param value 待检值
+ * @returns 步骤数组或失败
+ */
+function validateRecentSteps(value: unknown): ValidateResult<JobRecentStep[]> {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: validationFailed("recentSteps 必须是数组") };
+  }
+  if (value.length > 8) {
+    return { ok: false, error: validationFailed("recentSteps 最多 8 条") };
+  }
+  const steps: JobRecentStep[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const item = expectObject(value[index], `recentSteps[${index}]`);
+    if (!item.ok) {
+      return item;
+    }
+    const keys = rejectUnknownKeys(item.value, ["at", "kind", "text"] as const, `recentSteps[${index}]`);
+    if (!keys.ok) {
+      return keys;
+    }
+    const at = expectDateTime(item.value.at, `recentSteps[${index}].at`);
+    if (!at.ok) {
+      return at;
+    }
+    const kind = expectEnum(item.value.kind, `recentSteps[${index}].kind`, JOB_RECENT_STEP_KINDS);
+    if (!kind.ok) {
+      return kind;
+    }
+    const text = expectNonEmptyString(item.value.text, `recentSteps[${index}].text`);
+    if (!text.ok) {
+      return text;
+    }
+    if (text.value.length > 240) {
+      return { ok: false, error: validationFailed(`recentSteps[${index}].text 不得超过 240 字`) };
+    }
+    steps.push({ at: at.value, kind: kind.value, text: text.value });
+  }
+  return { ok: true, value: steps };
+}
+
+/**
  * 读取 job 可选字段并合并。
  *
  * @param obj 源对象
@@ -234,6 +288,27 @@ function mergeJobOptionals(
       };
     }
     payload.progressSummary = obj.progressSummary;
+  }
+  if ("recentSteps" in obj) {
+    const steps = validateRecentSteps(obj.recentSteps);
+    if (!steps.ok) {
+      return steps;
+    }
+    payload.recentSteps = steps.value;
+  }
+  if ("resultDigest" in obj) {
+    const digest = expectStringOrNull(obj.resultDigest, "resultDigest");
+    if (!digest.ok) {
+      return digest;
+    }
+    payload.resultDigest = digest.value;
+  }
+  if ("evidenceQuality" in obj) {
+    const quality = expectEnum(obj.evidenceQuality, "evidenceQuality", JOB_EVIDENCE_QUALITIES);
+    if (!quality.ok) {
+      return quality;
+    }
+    payload.evidenceQuality = quality.value as JobEvidenceQuality;
   }
   for (const key of [
     "workspaceHint",

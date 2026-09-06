@@ -21,6 +21,15 @@
     "workspaceHint": "F:/workspace/xxx",
     "allowedPermissions": ["workspace.read", "workspace.write", "command.run"],
     "progressSummary": "OpenClaw confirmed the run was canceled.",
+    "recentSteps": [
+      {
+        "at": "2026-07-22T00:06:50.000Z",
+        "kind": "lifecycle",
+        "text": "OpenClaw confirmed the run was canceled."
+      }
+    ],
+    "resultDigest": "OpenClaw confirmed the run was canceled.",
+    "evidenceQuality": "weak",
     "blockedReason": null,
     "resumeCondition": null,
     "statusReasonCode": "openclaw.cancel_ack",

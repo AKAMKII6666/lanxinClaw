@@ -6,7 +6,7 @@
  * 纯函数：仅类型定义。
  */
 
-import type { JobStatus } from "@lanxin-claw/protocol";
+import type { JobEvidenceQuality, JobRecentStep, JobStatus } from "@lanxin-claw/protocol";
 
 /**
  * 创建 adapter job 的显式入参。
@@ -51,6 +51,12 @@ export interface AdapterJobRecord {
   openclawSessionKey?: string | null;
   /** 进度摘要；安全文本，不含凭据 */
   progressSummary: string;
+  /** 最近执行步骤投影；最多 8 条 */
+  recentSteps: JobRecentStep[];
+  /** 终态可验收摘要；无业务结果时为 null */
+  resultDigest: string | null;
+  /** 证据质量；missing/weak/present */
+  evidenceQuality: JobEvidenceQuality;
   /** 阻塞原因；无阻塞时为 null */
   blockedReason: string | null;
   /** 恢复条件；无阻塞时为 null */

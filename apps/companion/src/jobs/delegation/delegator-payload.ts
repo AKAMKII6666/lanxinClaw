@@ -6,7 +6,12 @@
  * 纯函数。
  */
 
-import type { JobPayload, JobStatus } from "@lanxin-claw/protocol";
+import type {
+  JobEvidenceQuality,
+  JobPayload,
+  JobRecentStep,
+  JobStatus,
+} from "@lanxin-claw/protocol";
 
 /**
  * 将 adapter job 快照映射为协议 JobPayload。
@@ -23,6 +28,9 @@ export function toJobPayload(
     workspaceHint?: string | null;
     allowedPermissions: readonly string[];
     progressSummary: string;
+    recentSteps?: readonly JobRecentStep[];
+    resultDigest?: string | null;
+    evidenceQuality?: JobEvidenceQuality;
     blockedReason: string | null;
     resumeCondition: string | null;
     permissionRequestId?: string | null;
@@ -32,6 +40,8 @@ export function toJobPayload(
   },
   status: JobStatus,
 ): JobPayload {
+  const progressSummary = redactOutboundText(job.progressSummary ?? "");
+  const resultDigestRaw = job.resultDigest && String(job.resultDigest).trim() ? String(job.resultDigest) : null;
   return {
     jobId: job.jobId,
     affairId: job.affairId,
@@ -41,13 +51,46 @@ export function toJobPayload(
     goal: job.goal,
     workspaceHint: job.workspaceHint ?? null,
     allowedPermissions: [...job.allowedPermissions],
-    progressSummary: job.progressSummary ?? "",
-    blockedReason: job.blockedReason ?? null,
-    resumeCondition: job.resumeCondition ?? null,
+    progressSummary,
+    recentSteps: (job.recentSteps ?? []).map((step) => ({
+      at: step.at,
+      kind: step.kind,
+      text: redactOutboundText(step.text).slice(0, 240) || step.kind,
+    })),
+    resultDigest: resultDigestRaw ? redactOutboundText(resultDigestRaw) || null : null,
+    evidenceQuality: job.evidenceQuality ?? "missing",
+    blockedReason: job.blockedReason === null || job.blockedReason === undefined
+      ? job.blockedReason ?? null
+      : redactOutboundText(job.blockedReason) || null,
+    resumeCondition: job.resumeCondition === null || job.resumeCondition === undefined
+      ? job.resumeCondition ?? null
+      : redactOutboundText(job.resumeCondition) || null,
     permissionRequestId: job.permissionRequestId ?? null,
     statusReasonCode: job.statusReasonCode ?? null,
     statusObservedAt: job.statusObservedAt ?? null,
   };
+}
+
+/**
+ * companion 出站最后一道脱敏；与 adapter safeText 对齐并纵深防御。
+ *
+ * @param value 原始文本
+ * @returns 脱敏后文本
+ */
+function redactOutboundText(value: string): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "";
+  }
+  return text
+    .replace(/sk-[A-Za-z0-9_-]{10,}/g, "sk-***")
+    .replace(/Bearer\s+[A-Za-z0-9._-]{10,}/gi, "Bearer ***")
+    .replace(/((?:api[_-]?key|token|secret)\s*[:=]\s*)[A-Za-z0-9._-]{8,}/gi, "$1***")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "jwt-***")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "AKIA***")
+    .replace(/(postgres(?:ql)?|mysql|mongodb):\/\/[^\s]+/gi, "$1://***")
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[PRIVATE_KEY]")
+    .slice(0, 800);
 }
 
 /**

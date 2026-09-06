@@ -11,6 +11,11 @@ import {
 } from "@lanxin-claw/openclaw-adapter";
 import type { ProtocolEnvelope } from "@lanxin-claw/protocol";
 import { JobDelegator } from "../../../src/jobs/delegation/delegator.js";
+import {
+  buildDelegationFailureJob,
+  buildRuntimeReadFailureJob,
+} from "../../../src/jobs/delegation/projection/delegator-outbound.js";
+import { jobStatusFingerprint } from "../../../src/jobs/delegation/projection/job-status-fingerprint.js";
 import { PermissionGate } from "../../../src/permissions/gate/permission-gate.js";
 
 /**
@@ -292,7 +297,7 @@ test("状态变化回推：completed → job.completed，终态停轮询", async
   runtime.advance({
     runId: runId ?? "",
     status: "completed",
-    patch: { summary: "任务结果已整理完成" },
+    patch: { summary: "任务结果已整理完成：list_root count=3" },
   });
   affairStatuses.set("affair_test_001", "waiting_acceptance");
 
@@ -419,7 +424,7 @@ test("恢复轮询时若 adapter 已终态，先广播终态再停止", async ()
   runtime.advance({
     runId: created.job.openclawRunId ?? "",
     status: "completed",
-    patch: { summary: "done while companion was restarting" },
+    patch: { summary: "done while companion was restarting: list_root count=2" },
   });
 
   await delegator.restoreInFlightPolling(["job_restore_done"]);
@@ -618,4 +623,63 @@ test("workspaceHint 越出授权根时拒绝 createRun", async () => {
   const read = await adapter.readJob("job_scope");
   assert.equal(read.ok, false);
   delegator.stop();
+});
+
+test("buildDelegationFailureJob 把人话 reason 写入 resultDigest 且 evidenceQuality=weak", () => {
+  const job = buildDelegationFailureJob(
+    "job_fail",
+    "affair_fail",
+    "OpenClaw Gateway 不可达",
+    "lanxin.delegation_failed",
+    { goal: "列桌面", allowedPermissions: ["workspace.read"] },
+  );
+  assert.equal(job.progressSummary, "OpenClaw Gateway 不可达");
+  assert.equal(job.blockedReason, "OpenClaw Gateway 不可达");
+  assert.equal(job.resultDigest, "OpenClaw Gateway 不可达");
+  assert.equal(job.evidenceQuality, "weak");
+});
+
+test("buildRuntimeReadFailureJob 把人话 reason 写入 resultDigest 且 evidenceQuality=weak", () => {
+  const job = buildRuntimeReadFailureJob(
+    {
+      jobId: "job_read",
+      affairId: "affair_read",
+      goal: "跑测试",
+      allowedPermissions: ["command.run"],
+      progressSummary: "running",
+      recentSteps: [{ at: "2026-09-06T03:00:00.000Z", kind: "tool", text: "command.run" }],
+      resultDigest: null,
+      evidenceQuality: "weak",
+      blockedReason: null,
+      resumeCondition: null,
+    },
+    "读取 OpenClaw run 失败：timeout",
+    "runtime_read_failed",
+  );
+  assert.equal(job.progressSummary, "读取 OpenClaw run 失败：timeout");
+  assert.equal(job.blockedReason, "读取 OpenClaw run 失败：timeout");
+  assert.equal(job.resultDigest, "读取 OpenClaw run 失败：timeout");
+  assert.equal(job.evidenceQuality, "weak");
+  assert.equal(job.recentSteps?.length, 1);
+});
+
+test("jobStatusFingerprint 仅 recentSteps 变化也会变", () => {
+  const base = {
+    status: "running" as const,
+    progressSummary: "执行中",
+    blockedReason: null,
+    resumeCondition: null,
+    statusReasonCode: "openclaw.running",
+    resultDigest: null,
+    evidenceQuality: "weak" as const,
+    recentSteps: [{ at: "2026-09-06T03:00:00.000Z", kind: "tool" as const, text: "workspace.list" }],
+  };
+  const next = {
+    ...base,
+    recentSteps: [
+      ...base.recentSteps,
+      { at: "2026-09-06T03:00:05.000Z", kind: "tool" as const, text: "workspace.list: listing desktop" },
+    ],
+  };
+  assert.notEqual(jobStatusFingerprint(base), jobStatusFingerprint(next));
 });

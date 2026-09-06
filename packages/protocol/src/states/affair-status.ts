@@ -29,7 +29,7 @@ const AFFAIR_TRANSITIONS: Record<AffairStatus, readonly AffairStatus[]> = {
   running: ["blocked", "paused", "waiting_acceptance", "canceled"],
   blocked: ["running", "paused", "canceled"],
   paused: ["running", "blocked", "canceled"],
-  waiting_acceptance: ["closed", "running", "canceled"],
+  waiting_acceptance: ["closed", "running", "canceled", "blocked"],
   closed: [],
   canceled: [],
 };

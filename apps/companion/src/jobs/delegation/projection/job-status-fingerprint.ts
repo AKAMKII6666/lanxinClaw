@@ -6,7 +6,7 @@
  * 纯函数：无 I/O。
  */
 
-import type { JobStatus } from "@lanxin-claw/protocol";
+import type { JobEvidenceQuality, JobRecentStep, JobStatus } from "@lanxin-claw/protocol";
 
 /** 指纹输入。 */
 export interface JobStatusFingerprintInput {
@@ -20,6 +20,12 @@ export interface JobStatusFingerprintInput {
   resumeCondition: string | null;
   /** 状态理由码。 */
   statusReasonCode?: string | null;
+  /** 终态可验收摘要。 */
+  resultDigest?: string | null;
+  /** 证据质量。 */
+  evidenceQuality?: JobEvidenceQuality | null;
+  /** 最近执行步骤；指纹含全部步骤摘要，任一步变化须触发 job.progress。 */
+  recentSteps?: readonly JobRecentStep[];
 }
 
 /**
@@ -29,11 +35,19 @@ export interface JobStatusFingerprintInput {
  * @returns 稳定 JSON 指纹
  */
 export function jobStatusFingerprint(job: JobStatusFingerprintInput): string {
+  const steps = job.recentSteps ?? [];
+  const stepDigest = steps
+    .map((step) => `${step.kind}:${step.text}`)
+    .join("|");
   return JSON.stringify({
     status: job.status,
     progressSummary: job.progressSummary,
     blockedReason: job.blockedReason,
     resumeCondition: job.resumeCondition,
     statusReasonCode: job.statusReasonCode ?? null,
+    resultDigest: job.resultDigest ?? null,
+    evidenceQuality: job.evidenceQuality ?? null,
+    stepCount: steps.length,
+    stepDigest,
   });
 }

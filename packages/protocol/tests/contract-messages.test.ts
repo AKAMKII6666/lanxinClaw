@@ -198,6 +198,33 @@ describe("protocol message contract 正反例", () => {
     );
   });
 
+  it("正例：job 可携带监督投影字段 recentSteps/resultDigest/evidenceQuality", () => {
+    const ok = validatePayloadForType(
+      "job.completed",
+      jobPayload({
+        status: "completed",
+        progressSummary: "桌面文件：A.txt",
+        recentSteps: [
+          {
+            at: "2026-09-06T02:00:00.000Z",
+            kind: "reply",
+            text: "桌面文件：A.txt",
+          },
+        ],
+        resultDigest: "桌面文件：A.txt",
+        evidenceQuality: "present",
+      }),
+    );
+    assert.equal(ok.ok, true, ok.ok ? "" : ok.error.message);
+    assert.equal(
+      validatePayloadForType(
+        "job.progress",
+        jobPayload({ status: "running", evidenceQuality: "unknown" }),
+      ).ok,
+      false,
+    );
+  });
+
   it("反例：chat.message 不得冒充系统指令字段（未知 key）", () => {
     const bad = validatePayloadForType("chat.message", {
       chatMessageId: "chat_1",

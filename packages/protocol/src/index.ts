@@ -83,9 +83,14 @@ export {
 } from "./messages/companion-fc-catalog.js";
 
 export {
+  JOB_EVIDENCE_QUALITIES,
+  JOB_RECENT_STEP_KINDS,
   PERMISSION_IDS,
   type AffairPayload,
+  type JobEvidenceQuality,
   type JobPayload,
+  type JobRecentStep,
+  type JobRecentStepKind,
   type PairingChallengePayload,
   type PairingCompletedPayload,
   type PairingConfirmedPayload,

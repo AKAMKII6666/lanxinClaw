@@ -30,6 +30,9 @@ function baseJob(status: AdapterJobRecord["status"]): AdapterJobRecord {
     allowedPermissions: ["workspace.read"],
     openclawRunId: "run_apply",
     progressSummary: "",
+    recentSteps: [],
+    resultDigest: null,
+    evidenceQuality: "missing",
     blockedReason: null,
     resumeCondition: null,
     lastRunStatus: null,
@@ -69,7 +72,10 @@ describe("mapOpenClawRunStatusToJobStatus", () => {
 
 describe("applyRunSnapshotToJob 遵守 canTransitionJobStatus", () => {
   it("queued→completed 经合法路径可到达 completed", () => {
-    const next = applyRunSnapshotToJob(baseJob("queued"), snap("completed", { summary: "目录读取完成" }));
+    const next = applyRunSnapshotToJob(
+      baseJob("queued"),
+      snap("completed", { summary: "目录读取完成：list_root count=4" }),
+    );
     assert.equal(next.status, "completed");
   });
 
@@ -652,7 +658,7 @@ describe("OpenClawAdapter create/read/cancel", () => {
     advance({
       runId: created.job.openclawRunId!,
       status: "completed",
-      patch: { summary: "只读检查已完成" },
+      patch: { summary: "只读检查已完成：list_root count=3" },
     });
     const read = await adapter.readJob("job_done");
     assert.equal(read.ok, true);
@@ -678,7 +684,7 @@ describe("OpenClawAdapter create/read/cancel", () => {
     advance({
       runId: created.job.openclawRunId!,
       status: "completed",
-      patch: { summary: "adapter mock completed after permission grant" },
+      patch: { summary: "adapter mock completed after permission grant: listed 2 files" },
     });
     const read = await adapter.readJob("job_permission_granted_done");
     assert.equal(read.ok, true);

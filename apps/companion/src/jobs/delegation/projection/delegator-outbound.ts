@@ -9,6 +9,8 @@
 import {
   createEnvelope,
   type AffairPayload,
+  type JobEvidenceQuality,
+  type JobRecentStep,
   type JobStatus,
   type MessageType,
   type ProtocolEnvelope,
@@ -31,6 +33,12 @@ export interface DelegatorJobProjection {
   allowedPermissions: readonly string[];
   /** 进度摘要。 */
   progressSummary: string;
+  /** 最近执行步骤。 */
+  recentSteps?: readonly JobRecentStep[];
+  /** 终态可验收摘要。 */
+  resultDigest?: string | null;
+  /** 证据质量。 */
+  evidenceQuality?: JobEvidenceQuality;
   /** 阻塞原因。 */
   blockedReason: string | null;
   /** 恢复条件。 */
@@ -128,6 +136,9 @@ export function buildDelegationFailureJob(
     workspaceHint: context?.workspaceHint ?? null,
     allowedPermissions: [...(context?.allowedPermissions ?? [])],
     progressSummary: reason,
+    recentSteps: [],
+    resultDigest: reason,
+    evidenceQuality: "weak",
     blockedReason: reason,
     resumeCondition: null,
     statusReasonCode: code,
@@ -152,6 +163,9 @@ export function buildRuntimeReadFailureJob(
   return {
     ...job,
     progressSummary: reason,
+    recentSteps: job.recentSteps ?? [],
+    resultDigest: reason,
+    evidenceQuality: "weak",
     blockedReason: reason,
     resumeCondition: null,
     statusReasonCode: code.trim() || "runtime_read_failed",
@@ -166,5 +180,8 @@ function safeReason(message: string): string {
     .replace(/sk-[A-Za-z0-9_-]{10,}/g, "sk-***")
     .replace(/Bearer\s+[A-Za-z0-9._-]{10,}/gi, "Bearer ***")
     .replace(/((?:api[_-]?key|token|secret)\s*[:=]\s*)[A-Za-z0-9._-]{8,}/gi, "$1***")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "jwt-***")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "AKIA***")
+    .replace(/(postgres(?:ql)?|mysql|mongodb):\/\/[^\s]+/gi, "$1://***")
     .slice(0, 800);
 }

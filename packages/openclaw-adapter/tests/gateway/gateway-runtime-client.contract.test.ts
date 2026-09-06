@@ -44,13 +44,13 @@ describe("gateway runtime client contract", () => {
     }
     fake.advance(created.job.openclawRunId ?? "", {
       status: "completed",
-      summary: "gateway done",
+      summary: "gateway done: list_root count=2",
     });
     const read = await adapter.readJob("job_gateway_001");
     assert.equal(read.ok, true);
     if (read.ok) {
       assert.equal(read.job.status, "completed");
-      assert.equal(read.job.progressSummary, "gateway done");
+      assert.match(read.job.progressSummary, /list_root count=2/);
     }
 
     const canceled = await adapter.cancelJob("job_gateway_001");

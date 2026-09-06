@@ -21,6 +21,15 @@
     "workspaceHint": "F:/workspace/xxx",
     "allowedPermissions": ["workspace.read", "command.run", "network.access"],
     "progressSummary": "Dependency installation was attempted three times.",
+    "recentSteps": [
+      {
+        "at": "2026-07-22T00:04:30.000Z",
+        "kind": "tool",
+        "text": "command.run: npm install failed; registry unreachable"
+      }
+    ],
+    "resultDigest": "The desktop cannot reach the package registry. Resume after network access is restored.",
+    "evidenceQuality": "weak",
     "blockedReason": "The desktop cannot reach the package registry. Resume after network access is restored."
   }
 }

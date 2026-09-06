@@ -6,7 +6,7 @@
  * 纯函数：不修改入参。
  */
 
-import type { JobStatus } from "@lanxin-claw/protocol";
+import type { JobEvidenceQuality, JobRecentStep, JobStatus } from "@lanxin-claw/protocol";
 import type {
   OpenClawEvidenceKind,
   OpenClawEvidenceStrength,
@@ -25,16 +25,24 @@ import {
   hasNegativeFinalReply,
   hasTerminalLifecycle,
   isLifecycleError,
+  isLowSignalText,
   isTerminalTimeout,
   isWaitError,
   isWaitOkWithTerminalEvidence,
   isWaitOnlyTimeout,
   normalizeEvidenceRunStatus,
+  pickMeaningfulBusinessText,
   resumeConditionFromEvidence,
   safeText,
   summaryFromEvidence,
   type TaskOutcome,
 } from "./decision/evidence-helpers.js";
+import {
+  hasBusinessCompletionEvidence,
+  hasMeaningfulTaskCompletion,
+  hasNegativeToolFinding,
+} from "./decision/completion-gate.js";
+import { buildSuperviseProjection } from "./decision/supervise-projection.js";
 
 /** Lanxin 终态门闩。 */
 const TERMINAL_JOB_STATUSES = new Set<JobStatus>(["completed", "failed", "canceled"]);
@@ -59,6 +67,12 @@ export interface OpenClawToLanxinJobDecision {
   evidenceStrength: OpenClawEvidenceStrength;
   /** OpenClaw 原始归一化状态；未知则为 null。 */
   rawRunStatus: string | null;
+  /** 最近执行步骤投影；最多 8 条。 */
+  recentSteps: JobRecentStep[];
+  /** 终态可验收摘要；低信号时为 null。 */
+  resultDigest: string | null;
+  /** 证据质量；由 adapter 生成，phone 只用于回报提示。 */
+  evidenceQuality: JobEvidenceQuality;
 }
 
 interface DecisionContext {
@@ -123,6 +137,10 @@ function terminalJobRule(context: DecisionContext): OpenClawToLanxinJobDecision 
   if (!TERMINAL_JOB_STATUSES.has(job.status)) {
     return null;
   }
+  // 空壳 completed 允许被 terminal_without_result 纠为 blocked，不永久闩锁。
+  if (isHollowCompletedJob(job)) {
+    return null;
+  }
   return decision(job.status, evidence, {
     kind: "lanxin.terminal_latch",
     strength: "strong",
@@ -132,6 +150,22 @@ function terminalJobRule(context: DecisionContext): OpenClawToLanxinJobDecision 
     resumeCondition: job.resumeCondition,
     rawRunStatus: context.rawRunStatus,
   });
+}
+
+/**
+ * 空壳 completed：无 present 业务证据或摘要仍是低信号。
+ *
+ * @param job adapter job
+ * @returns 可被纠错时为 true
+ */
+function isHollowCompletedJob(job: AdapterJobRecord): boolean {
+  if (job.status !== "completed") {
+    return false;
+  }
+  if (job.evidenceQuality !== "present") {
+    return true;
+  }
+  return isLowSignalText(job.progressSummary) && isLowSignalText(job.resultDigest);
 }
 
 function cancellationRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
@@ -315,11 +349,14 @@ function completedRule(context: DecisionContext): OpenClawToLanxinJobDecision | 
   if (!hasBusinessCompletionEvidence(context)) {
     return null;
   }
+  const summary =
+    pickMeaningfulBusinessText(evidence, null) ??
+    summaryFromEvidence(evidence, "OpenClaw 已返回可验收结果");
   return decision("completed", evidence, {
-    kind: hasMeaningfulTaskResult(evidence) ? "task.completed" : "wait.completed",
+    kind: hasMeaningfulTaskCompletion(evidence) ? "task.completed" : "wait.completed",
     strength: "medium",
     reasonCode: "openclaw.run_completed",
-    summary: summaryFromEvidence(evidence, "OpenClaw run 已结束"),
+    summary,
     blockedReason: null,
     resumeCondition: null,
     rawRunStatus: context.rawRunStatus,
@@ -347,95 +384,6 @@ function hasTerminalSuccessSignal(context: DecisionContext): boolean {
     context.rawRunStatus === "completed" ||
     isWaitOkWithTerminalEvidence(context.evidence) ||
     context.taskOutcome === "completed"
-  );
-}
-
-function hasBusinessCompletionEvidence(context: DecisionContext): boolean {
-  const { evidence, taskOutcome } = context;
-  if (taskOutcome === "completed" && hasMeaningfulTaskResult(evidence)) {
-    return true;
-  }
-  if (hasMeaningfulToolCompletionEvidence(context)) {
-    return true;
-  }
-  if (requiresStructuredCompletionEvidence(context)) {
-    return false;
-  }
-  return hasMeaningfulFinalReply(evidence);
-}
-
-function hasMeaningfulToolCompletionEvidence(context: DecisionContext): boolean {
-  const succeeded = context.evidence.toolFindings.filter((finding) => finding.status === "succeeded");
-  if (succeeded.length === 0) {
-    return false;
-  }
-  if (!requiresStructuredCompletionEvidence(context)) {
-    return true;
-  }
-  return succeeded.some((finding) => {
-    const summary = safeText(finding.summary ?? "");
-    return isMeaningfulCompletionText(summary) && !isProcessOnlyToolSummary(summary, finding.toolName);
-  });
-}
-
-function requiresStructuredCompletionEvidence(context: DecisionContext): boolean {
-  const permissions = new Set(context.job.allowedPermissions);
-  if (
-    permissions.has("workspace.write") ||
-    permissions.has("command.run") ||
-    permissions.has("network.access") ||
-    permissions.has("desktop.control")
-  ) {
-    return true;
-  }
-  const goal = safeText(context.job.goal);
-  return /(browser|web|http|https|url|news|search|浏览器|网页|网址|新闻|搜索|联网)/i.test(goal);
-}
-
-function isProcessOnlyToolSummary(summary: string, toolName?: string): boolean {
-  const text = safeText(`${toolName ?? ""} ${summary}`);
-  if (!text) {
-    return true;
-  }
-  if (/^(ok|done|completed|complete|success|succeeded|stop|stopped|end|ended)$/i.test(summary)) {
-    return true;
-  }
-  const hasResultSignal =
-    /(found|result|results|content|article|summary|extracted|read|listed|wrote|updated|saved|passed|查到|找到|结果|内容|正文|文章|摘要|读取|列出|写入|更新|保存|通过)/i.test(text);
-  if (hasResultSignal) {
-    return false;
-  }
-  return /(browser|open|opened|launch|launched|navigate|navigated|click|clicked|start|started|blank|空白页)/i.test(text);
-}
-
-function hasMeaningfulFinalReply(evidence: OpenClawExecutionEvidence): boolean {
-  if (hasNegativeFinalReply(evidence)) {
-    return false;
-  }
-  return isMeaningfulCompletionText(evidence.finalReply?.text);
-}
-
-function hasMeaningfulTaskResult(evidence: OpenClawExecutionEvidence): boolean {
-  return (
-    isMeaningfulCompletionText(evidence.task?.terminalSummary) ||
-    isMeaningfulCompletionText(evidence.task?.progressSummary) ||
-    isMeaningfulCompletionText(evidence.task?.terminalOutcome)
-  );
-}
-
-function isMeaningfulCompletionText(value: string | null | undefined): boolean {
-  const text = safeText(value ?? "");
-  return Boolean(
-    text && !/^(ok|done|completed|complete|success|succeeded|stop|stopped|end|ended)$/i.test(text),
-  );
-}
-
-function hasNegativeToolFinding(evidence: OpenClawExecutionEvidence): boolean {
-  return evidence.toolFindings.some((finding) =>
-    finding.status === "failed" ||
-    finding.status === "blocked" ||
-    finding.status === "timed_out" ||
-    finding.status === "cancelled"
   );
 }
 
@@ -494,9 +442,15 @@ function decision(
     rawRunStatus?: string | null;
   },
 ): OpenClawToLanxinJobDecision {
+  let progressSummary = safeText(input.summary);
+  if (isLowSignalText(progressSummary)) {
+    progressSummary =
+      pickMeaningfulBusinessText(evidence, null) ?? humanProgressFallback(status);
+  }
+  const projection = buildSuperviseProjection(evidence, status, progressSummary);
   return {
     status,
-    progressSummary: safeText(input.summary),
+    progressSummary,
     blockedReason: input.blockedReason === null ? null : safeText(input.blockedReason),
     resumeCondition: input.resumeCondition === null ? null : safeText(input.resumeCondition),
     statusReasonCode: input.reasonCode,
@@ -504,5 +458,34 @@ function decision(
     evidenceKind: input.kind,
     evidenceStrength: input.strength,
     rawRunStatus: input.rawRunStatus ?? normalizeEvidenceRunStatus(evidence),
+    recentSteps: projection.recentSteps,
+    resultDigest: projection.resultDigest,
+    evidenceQuality: projection.evidenceQuality,
   };
+}
+
+/**
+ * 低信号摘要时的状态人话兜底。
+ *
+ * @param status job 状态
+ * @returns 非低信号的人话进度
+ */
+function humanProgressFallback(status: JobStatus): string {
+  switch (status) {
+    case "completed":
+      return "OpenClaw 已返回可验收结果";
+    case "blocked":
+      return "OpenClaw 执行被阻塞";
+    case "failed":
+      return "OpenClaw 执行失败";
+    case "canceled":
+      return "OpenClaw 已确认取消";
+    case "needs_permission":
+      return "OpenClaw 正在等待授权";
+    case "queued":
+      return "OpenClaw 已接收任务";
+    case "running":
+    default:
+      return "OpenClaw 正在执行";
+  }
 }

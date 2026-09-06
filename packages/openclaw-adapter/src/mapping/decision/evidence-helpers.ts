@@ -296,26 +296,122 @@ export function resumeConditionFromEvidence(evidence: OpenClawExecutionEvidence,
   return safeText(evidence.wait?.stopReason ?? evidence.lifecycle?.terminalReason ?? fallback);
 }
 
+/** 纯状态词 / 弱结果词（无实体载荷）。 */
+const LOW_SIGNAL_EXACT_RE =
+  /^(ok|done|completed|complete|success|succeeded|stop|stopped|end|ended|finish|finished|running|accepted|queued|pending|passed|listed|found|saved|read|wrote|updated|result|results|content)$/i;
+
+/** 空壳完成套话；无实体载荷时不算可验收。 */
+const COMPLETION_BOILERPLATE_RE =
+  /(completed successfully|task completed successfully|successfully completed|i(?:'ve| have) finished(?: the)? task|all done|^已完成$|^执行完毕$|^处理完毕$|已完成任务|任务已完成|执行成功|运行成功|执行完毕|处理完毕)/i;
+
+/**
+ * 判断文本是否为无业务信息的低信号状态词。
+ *
+ * @param value 待检查文本
+ * @returns 空串或纯状态词时为 true
+ */
+export function isLowSignalText(value: string | null | undefined): boolean {
+  const text = safeText(value ?? "");
+  return !text || LOW_SIGNAL_EXACT_RE.test(text);
+}
+
+/**
+ * 判断摘要是否含可验收业务实体（路径、文件、数量、URL 等）。
+ *
+ * @param value 待检查文本
+ * @returns 含实体信号时为 true
+ */
+export function hasBusinessEntitySignal(value: string | null | undefined): boolean {
+  const text = safeText(value ?? "");
+  if (!text) {
+    return false;
+  }
+  return /(?:\.(?:txt|docx?|pdf|xlsx?|csv|json|md|png|jpe?g|gif|zip|log|js|ts|tsx|py|html?)\b|[\\/]|[A-Za-z]:\\|https?:\/\/|\d+\s*(?:files?|items?|tests?|个|份|条)|count[=:]\s*\d+|list_root|一共|共有|列出了|列出来|文件名|路径|桌面文件|desktop files?|查到.{1,40}|找到.{1,40}|结果[:：].{2,}|内容[:：].{2,}|wrote\s+\S+|updated\s+\S+|saved\s+\S+|listed\s+\d+|read\s+\S+|passed with\s+\d+)/i.test(
+    text,
+  );
+}
+
+/**
+ * 判断文本是否可作为进度/失败等人话摘要（允许无实体，但拒绝低信号与空壳套话）。
+ *
+ * @param value 待检查文本
+ * @returns 可用作 progressSummary 时为 true
+ */
+export function isUsableProgressText(value: string | null | undefined): boolean {
+  const text = safeText(value ?? "");
+  if (!text || isLowSignalText(text)) {
+    return false;
+  }
+  if (COMPLETION_BOILERPLATE_RE.test(text) && !hasBusinessEntitySignal(text)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 判断文本是否可作为 completed / 可验收摘要。
+ *
+ * @param value 待检查文本
+ * @returns 非空、非低信号，且含业务实体信号时为 true
+ */
+export function isMeaningfulCompletionText(value: string | null | undefined): boolean {
+  return isUsableProgressText(value) && hasBusinessEntitySignal(value);
+}
+
+/**
+ * 按优先级挑选第一段有业务含义的文本。
+ *
+ * @param evidence OpenClaw 观测证据
+ * @param fallback 可选兜底；低信号时忽略
+ * @returns 脱敏后的业务文本；无可用文本时为 null
+ */
+export function pickMeaningfulBusinessText(
+  evidence: OpenClawExecutionEvidence,
+  fallback?: string | null,
+): string | null {
+  const toolTexts = [...evidence.toolFindings]
+    .reverse()
+    .flatMap((finding) => [finding.summary, finding.errorCode]);
+  const candidates = [
+    evidence.finalReply?.text,
+    evidence.task?.terminalSummary,
+    evidence.task?.progressSummary,
+    ...toolTexts,
+    evidence.task?.error,
+    evidence.wait?.error,
+    evidence.lifecycle?.terminalReason,
+    fallback,
+  ];
+  for (const candidate of candidates) {
+    if (isMeaningfulCompletionText(candidate)) {
+      return safeText(candidate);
+    }
+  }
+  for (const candidate of candidates) {
+    if (isUsableProgressText(candidate)) {
+      return safeText(candidate);
+    }
+  }
+  return null;
+}
+
 /**
  * 从证据中提取用户可见摘要。
  *
  * @param evidence OpenClaw 观测证据
- * @param fallback 无摘要时的兜底文案
- * @returns 已脱敏的摘要
+ * @param fallback 无摘要时的兜底文案；若也是低信号则改用人话默认句
+ * @returns 已脱敏的摘要；禁止单独广播纯状态词
  */
 export function summaryFromEvidence(evidence: OpenClawExecutionEvidence, fallback: string): string {
-  const tool = [...evidence.toolFindings].reverse().find((finding) => finding.summary || finding.errorCode);
-  return safeText(
-    tool?.summary ??
-      tool?.errorCode ??
-      evidence.task?.terminalSummary ??
-      evidence.task?.progressSummary ??
-      evidence.task?.error ??
-      evidence.finalReply?.text ??
-      evidence.wait?.error ??
-      evidence.lifecycle?.terminalReason ??
-      fallback,
-  );
+  const picked = pickMeaningfulBusinessText(evidence, null);
+  if (picked) {
+    return picked;
+  }
+  const safeFallback = safeText(fallback);
+  if (safeFallback && !isLowSignalText(safeFallback)) {
+    return safeFallback;
+  }
+  return "OpenClaw 正在执行";
 }
 
 /**
@@ -333,5 +429,9 @@ export function safeText(value: string | null | undefined): string {
     .replace(/sk-[A-Za-z0-9_-]{10,}/g, "sk-***")
     .replace(/Bearer\s+[A-Za-z0-9._-]{10,}/gi, "Bearer ***")
     .replace(/((?:api[_-]?key|token|secret)\s*[:=]\s*)[A-Za-z0-9._-]{8,}/gi, "$1***")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "jwt-***")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "AKIA***")
+    .replace(/(postgres(?:ql)?|mysql|mongodb):\/\/[^\s]+/gi, "$1://***")
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[PRIVATE_KEY]")
     .slice(0, 800);
 }

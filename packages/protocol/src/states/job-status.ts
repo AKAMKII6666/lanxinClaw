@@ -25,7 +25,8 @@ const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
   running: ["needs_permission", "blocked", "completed", "failed", "canceled"],
   needs_permission: ["running", "blocked", "failed", "canceled"],
   blocked: ["running", "failed", "canceled"],
-  completed: [],
+  // 仅用于空壳 completed 纠为 terminal_without_result；真完成不得被非终态复活。
+  completed: ["blocked"],
   failed: [],
   canceled: [],
 };
