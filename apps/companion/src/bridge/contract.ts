@@ -84,6 +84,12 @@ export interface OnboardingSubmitPayload {
   endpoint?: string | null;
   /** 模型引用 */
   modelRef: string;
+  /** 用户同意启用网页搜索；默认 false */
+  enableWebSearch?: boolean;
+  /** 用户同意启用 browser；默认 false */
+  enableBrowser?: boolean;
+  /** web search API key；不落 openclaw.json 明文 */
+  webSearchApiKey?: string;
 }
 
 /** onboarding 提交结果（renderer 可见） */

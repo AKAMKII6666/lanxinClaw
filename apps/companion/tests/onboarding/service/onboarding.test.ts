@@ -28,6 +28,9 @@ const CONFIG: OnboardingConfig = {
   apiKey: "sk-test-123",
   endpoint: null,
   modelRef: "openai/gpt-5.5",
+  enableWebSearch: false,
+  enableBrowser: false,
+  webSearchApiKey: "",
 };
 
 /**

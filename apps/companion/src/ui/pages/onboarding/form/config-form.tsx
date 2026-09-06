@@ -44,6 +44,12 @@ export interface ConfigFormProps {
   onQwenModelChange: (next: string) => void;
   onQwenAdvancedOpenChange: (next: boolean) => void;
   onQwenWorkspaceIdChange: (next: string) => void;
+  enableWebSearch: boolean;
+  enableBrowser: boolean;
+  webSearchApiKey: string;
+  onEnableWebSearchChange: (next: boolean) => void;
+  onEnableBrowserChange: (next: boolean) => void;
+  onWebSearchApiKeyChange: (next: string) => void;
   onSubmit: () => void;
 }
 
@@ -89,6 +95,12 @@ export function ConfigForm(props: ConfigFormProps): ReactElement {
             onQwenModelChange={props.onQwenModelChange}
             onQwenAdvancedOpenChange={props.onQwenAdvancedOpenChange}
             onQwenWorkspaceIdChange={props.onQwenWorkspaceIdChange}
+            enableWebSearch={props.enableWebSearch}
+            enableBrowser={props.enableBrowser}
+            webSearchApiKey={props.webSearchApiKey}
+            onEnableWebSearchChange={props.onEnableWebSearchChange}
+            onEnableBrowserChange={props.onEnableBrowserChange}
+            onWebSearchApiKeyChange={props.onWebSearchApiKeyChange}
           />
           {props.error ? (
             <Alert severity="error" sx={{ mt: 2 }}>

@@ -87,7 +87,24 @@ test("ensureStarted：写 config（env ref 不含明文 key）、启动、幂等
   });
   assert.equal(same, handle, "幂等：重复 ensureStarted 返回同一句柄");
 
-  await handle.stop();
+  const restarted = await service.ensureStarted({
+    provider: "openai",
+    apiKey: "sk-secret-key",
+    endpoint: null,
+    modelRef: "openai/gpt-5.5",
+    workspace: path.join(stateDir, "workspace"),
+    enableBrowser: true,
+  });
+  assert.notEqual(restarted, handle, "启用 browser 必须重启 gateway");
+  assert.equal(service.isRunning(), true);
+  const configAfter = JSON.parse(fs.readFileSync(path.join(stateDir, "openclaw.json"), "utf8")) as {
+    browser?: { enabled?: boolean };
+    tools?: { alsoAllow?: string[] };
+  };
+  assert.equal(configAfter.browser?.enabled, true);
+  assert.ok(configAfter.tools?.alsoAllow?.includes("browser"));
+
+  await restarted.stop();
   assert.equal(service.isRunning(), false);
   assert.equal(service.getHandle(), null);
 });

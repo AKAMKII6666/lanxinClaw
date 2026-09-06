@@ -15,6 +15,12 @@ export interface OnboardingConfig {
   endpoint: string | null;
   /** 模型引用（provider/model，如 openai/gpt-5.5） */
   modelRef: string;
+  /** 用户同意启用 OpenClaw 网页搜索能力；默认 false */
+  enableWebSearch?: boolean;
+  /** 用户同意启用 OpenClaw browser 能力；默认 false */
+  enableBrowser?: boolean;
+  /** Brave 等 web search API key；仅内存/加密存储，不入 openclaw.json */
+  webSearchApiKey?: string;
 }
 
 /** 探针结果 */

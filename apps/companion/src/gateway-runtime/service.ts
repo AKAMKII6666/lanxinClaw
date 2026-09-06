@@ -14,8 +14,15 @@ import type { Logger } from "pino";
 import {
   generateOpenClawConfig,
   OPENCLAW_MODEL_KEY_ENV,
+  OPENCLAW_BRAVE_KEY_ENV,
   providerMeta,
 } from "./openclaw-config.js";
+import {
+  summarizeOpenClawToolCapabilitiesFromText,
+  type OpenClawToolCapabilitySummary,
+} from "./openclaw-capability.js";
+import { redactOpenClawRuntimeLine } from "./redact-runtime-line.js";
+import { sameGatewayRuntimeInput } from "./same-runtime-input.js";
 import {
   DEFAULT_STARTUP_TIMEOUT_MS,
   findFreePort,
@@ -65,6 +72,12 @@ export interface StartGatewayRuntimeInput {
   modelRef: string;
   /** agent 工作区 */
   workspace: string;
+  /** 用户同意启用网页搜索 */
+  enableWebSearch?: boolean;
+  /** 用户同意启用 browser */
+  enableBrowser?: boolean;
+  /** web search API key（仅 env，不入 json） */
+  webSearchApiKey?: string;
 }
 
 /** 运行句柄 */
@@ -131,6 +144,26 @@ export class GatewayRuntimeService {
   }
 
   /**
+   * 读取当前 stateDir 下 openclaw.json 的工具能力摘要（无 key 明文）。
+   *
+   * @returns 能力摘要
+   */
+  getOpenClawToolCapabilities(): OpenClawToolCapabilitySummary {
+    const configPath = path.join(this.options.stateDir, "openclaw.json");
+    let text = "";
+    try {
+      text = fs.readFileSync(configPath, "utf8");
+    } catch {
+      text = "";
+    }
+    const hasBraveApiKey = Boolean(
+      this.lastInput?.webSearchApiKey?.trim() ||
+        process.env[OPENCLAW_BRAVE_KEY_ENV]?.trim(),
+    );
+    return summarizeOpenClawToolCapabilitiesFromText(text, { hasBraveApiKey });
+  }
+
+  /**
    * 当前句柄（未启动为 null）。
    *
    * @returns 句柄
@@ -140,24 +173,46 @@ export class GatewayRuntimeService {
   }
 
   /**
-   * 确保 gateway 已启动（幂等）；配置变化时生成新 config。
+   * 确保 gateway 已启动（幂等）；配置变化时重写 config 并重启。
    *
    * @param input 启动入参
    * @returns 运行句柄
    */
   async ensureStarted(input: StartGatewayRuntimeInput): Promise<GatewayRuntimeHandle> {
-    this.lastInput = input;
     this.desiredRunning = true;
-    if (this.handle && this.manager?.isRunning()) {
-      return this.handle;
-    }
     if (this.startInFlight) {
       return this.startInFlight;
     }
+    if (this.handle && this.manager?.isRunning()) {
+      if (sameGatewayRuntimeInput(this.lastInput, input)) {
+        this.lastInput = input;
+        return this.handle;
+      }
+      this.options.logger?.info({}, "OpenClaw 配置变更，重启 gateway");
+      await this.stopRunningInstance();
+    }
+    this.lastInput = input;
     this.startInFlight = this.startFresh(input).finally(() => {
       this.startInFlight = null;
     });
     return this.startInFlight;
+  }
+
+  /**
+   * 仅停当前实例，不清 desiredRunning（供配置热更新重启）。
+   *
+   * @returns 完成
+   */
+  private async stopRunningInstance(): Promise<void> {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+    if (this.manager) {
+      await this.manager.stop();
+      this.manager = null;
+    }
+    this.handle = null;
   }
 
   /**
@@ -186,6 +241,14 @@ export class GatewayRuntimeService {
       baseUrl: meta.baseUrl,
       workspace: input.workspace,
       logFile,
+      webTools:
+        input.enableWebSearch || input.enableBrowser
+          ? {
+              enableWebSearch: input.enableWebSearch === true,
+              enableBrowser: input.enableBrowser === true,
+              withWebSearchApiKey: Boolean(input.webSearchApiKey?.trim()),
+            }
+          : null,
     });
     fs.writeFileSync(path.join(stateDir, "openclaw.json"), configText, "utf8");
 
@@ -194,6 +257,9 @@ export class GatewayRuntimeService {
     };
     if (meta.needsKey && input.apiKey.trim()) {
       env[OPENCLAW_MODEL_KEY_ENV] = input.apiKey.trim();
+    }
+    if (input.webSearchApiKey?.trim()) {
+      env[OPENCLAW_BRAVE_KEY_ENV] = input.webSearchApiKey.trim();
     }
     const managerOptions: GatewayRuntimeManagerOptions = {
       openclawEntry: this.options.openclawEntry,
@@ -209,8 +275,16 @@ export class GatewayRuntimeService {
     }
     if (this.options.logger) {
       managerOptions.logger = this.options.logger;
-      managerOptions.onStdout = (line) => this.options.logger?.info({ stream: "stdout", line }, "OpenClaw stdout");
-      managerOptions.onStderr = (line) => this.options.logger?.error({ stream: "stderr", line }, "OpenClaw stderr");
+      managerOptions.onStdout = (line) =>
+        this.options.logger?.info(
+          { stream: "stdout", line: redactOpenClawRuntimeLine(line) },
+          "OpenClaw stdout",
+        );
+      managerOptions.onStderr = (line) =>
+        this.options.logger?.error(
+          { stream: "stderr", line: redactOpenClawRuntimeLine(line) },
+          "OpenClaw stderr",
+        );
     }
     managerOptions.onExit = (code, signal) => this.handleExit(code, signal);
     const manager = new GatewayRuntimeManager(managerOptions);

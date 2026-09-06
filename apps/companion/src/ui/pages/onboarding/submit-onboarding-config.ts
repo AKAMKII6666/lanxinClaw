@@ -16,6 +16,9 @@ export interface QwenSubmitFormSlice {
   modelId: string;
   advancedOpen: boolean;
   workspaceId: string;
+  enableWebSearch?: boolean;
+  enableBrowser?: boolean;
+  webSearchApiKey?: string;
 }
 
 /** 通用表单切片 */
@@ -23,6 +26,9 @@ export interface GenericSubmitFormSlice {
   apiKey: string;
   endpoint: string;
   modelRef: string;
+  enableWebSearch?: boolean;
+  enableBrowser?: boolean;
+  webSearchApiKey?: string;
 }
 
 /**

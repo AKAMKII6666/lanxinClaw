@@ -20,6 +20,7 @@ import type { ElectronRuntime, StartCompanionShellOptions } from "./electron-run
 import { createSecretsFromSafeStorage } from "./safe-storage-secrets.js";
 import { buildResidentTrayExtraItems, showDesktopNotification } from "./resident-tray-menu.js";
 import { buildGatewayDiagnosticsInput, buildGatewaySnapshotExtras } from "./panel-runtime-extras.js";
+import { toOnboardingServiceConfig } from "./onboarding-config-map.js";
 import { createCompanionBackendRuntime } from "../../backend/runtime.js";
 import { createFileAuditStore } from "../../audit/file-store.js";
 import { FileIdentityPersistence } from "../../credentials/persistence/file-identity-persistence.js";
@@ -164,6 +165,9 @@ export async function startCompanionDesktopShell(
         endpoint: stored.endpoint,
         modelRef: stored.modelRef,
         workspace,
+        enableWebSearch: stored.enableWebSearch === true,
+        enableBrowser: stored.enableBrowser === true,
+        webSearchApiKey: stored.webSearchApiKey ?? "",
       });
       delegator?.setAdapter(handle.adapter);
       return createGatewayRuntimeReadyProbe({
@@ -178,15 +182,7 @@ export async function startCompanionDesktopShell(
       lastError: onboardingService.getLastError(),
     }),
     submit: async (config, options) => {
-      const probe = await onboardingService.submitConfig(
-        {
-          provider: config.provider,
-          apiKey: config.apiKey,
-          endpoint: config.endpoint ?? null,
-          modelRef: config.modelRef,
-        },
-        options,
-      );
+      const probe = await onboardingService.submitConfig(toOnboardingServiceConfig(config), options);
       return {
         ok: probe.ok,
         ...(probe.ok
@@ -364,6 +360,9 @@ export async function startCompanionDesktopShell(
     protocolHandle = await startCompanionProtocolServer({
       ...protocolOptions,
       logger: logRegistry.getLogger("protocol"),
+      getOpenClawToolCapabilities: gatewayService
+        ? () => gatewayService.getOpenClawToolCapabilities()
+        : undefined,
       onJobCancel: (input) => (delegator ? delegator.cancelJob(input) : Promise.resolve()),
       onSessionAccepted: () => {
         flushPendingContext({

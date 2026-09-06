@@ -16,6 +16,9 @@ export interface QwenSubmitInput {
   modelId: string;
   advancedOpen: boolean;
   workspaceId: string;
+  enableWebSearch?: boolean;
+  enableBrowser?: boolean;
+  webSearchApiKey?: string;
 }
 
 /** 通用 provider 表单输入 */
@@ -24,6 +27,9 @@ export interface GenericSubmitInput {
   apiKey: string;
   endpoint: string;
   modelRef: string;
+  enableWebSearch?: boolean;
+  enableBrowser?: boolean;
+  webSearchApiKey?: string;
 }
 
 /**
@@ -59,6 +65,11 @@ export function buildQwenSubmitPayload(
         apiKey: input.apiKey.trim(),
         endpoint: resolved.endpoint,
         modelRef: resolved.modelRef,
+        enableWebSearch: input.enableWebSearch === true,
+        enableBrowser: input.enableBrowser === true,
+        ...(input.webSearchApiKey?.trim()
+          ? { webSearchApiKey: input.webSearchApiKey.trim() }
+          : {}),
       },
     };
   } catch {
@@ -78,6 +89,11 @@ export function buildGenericSubmitPayload(input: GenericSubmitInput): Onboarding
     apiKey: input.apiKey.trim(),
     ...(input.endpoint.trim() ? { endpoint: input.endpoint.trim() } : {}),
     modelRef: input.modelRef.trim(),
+    enableWebSearch: input.enableWebSearch === true,
+    enableBrowser: input.enableBrowser === true,
+    ...(input.webSearchApiKey?.trim()
+      ? { webSearchApiKey: input.webSearchApiKey.trim() }
+      : {}),
   };
 }
 
@@ -92,7 +108,10 @@ export function buildGenericSubmitPayload(input: GenericSubmitInput): Onboarding
 export function buildSubmitPayload(
   provider: OnboardingSubmitPayload["provider"],
   qwen: QwenSubmitInput,
-  generic: Pick<GenericSubmitInput, "apiKey" | "endpoint" | "modelRef">,
+  generic: Pick<
+    GenericSubmitInput,
+    "apiKey" | "endpoint" | "modelRef" | "enableWebSearch" | "enableBrowser" | "webSearchApiKey"
+  >,
 ): { ok: true; value: OnboardingSubmitPayload } | { ok: false; message: string } {
   if (provider === "qwen") {
     return buildQwenSubmitPayload(qwen);

@@ -15,6 +15,11 @@ export interface GatewayStatusPort {
   isRunning(): boolean;
   getLastRestartError(): { code?: string; message: string } | null;
   getHandle(): { url: string } | null;
+  /** 可选：OpenClaw 工具能力摘要 */
+  getOpenClawToolCapabilities?: () => {
+    webSearch: { ready: boolean; detail: string };
+    browser: { ready: boolean; detail: string };
+  };
 }
 
 /**
@@ -30,6 +35,10 @@ export function buildGatewaySnapshotExtras(
 ): SnapshotProjectionExtras {
   const running = gateway?.isRunning() ?? false;
   const degraded = gateway?.isDegraded() ?? false;
+  const caps = gateway?.getOpenClawToolCapabilities?.();
+  const capabilityNote = caps
+    ? `；web_search=${caps.webSearch.ready ? "ready" : "off"}；browser=${caps.browser.ready ? "ready" : "off"}`
+    : "";
   return {
     clawCore: {
       status: degraded ? "error" : running ? "running" : "stopped",
@@ -38,7 +47,7 @@ export function buildGatewaySnapshotExtras(
       message: degraded
         ? gateway?.getLastRestartError()?.message ?? "Gateway 已停止自动重启"
         : running
-          ? "自托管 Gateway 运行中"
+          ? `自托管 Gateway 运行中${capabilityNote}`
           : "OpenClaw Gateway 未就绪",
     },
     credential: {
@@ -69,7 +78,11 @@ export function buildGatewayDiagnosticsInput(input: {
   | "lanDiscoveryReady"
   | "secureStorageReady"
   | "recentServerErrorCode"
+  | "openClawWebSearchReady"
+  | "openClawBrowserReady"
+  | "openClawCapabilityDetail"
 > {
+  const caps = input.gateway?.getOpenClawToolCapabilities?.();
   return {
     protocolServerReady: input.protocolServerReady,
     gatewayReady: input.gateway?.isRunning() ?? false,
@@ -78,5 +91,10 @@ export function buildGatewayDiagnosticsInput(input: {
     secureStorageReady: input.secretsAvailable,
     recentServerErrorCode:
       input.recentServerErrorCode ?? input.gateway?.getLastRestartError()?.code ?? null,
+    openClawWebSearchReady: caps?.webSearch.ready ?? false,
+    openClawBrowserReady: caps?.browser.ready ?? false,
+    openClawCapabilityDetail: caps
+      ? `webSearch=${caps.webSearch.detail}; browser=${caps.browser.detail}`
+      : null,
   };
 }

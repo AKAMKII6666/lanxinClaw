@@ -8,7 +8,8 @@ import { useEffect, useState } from "react";
 import type { OnboardingPhase, OnboardingSubmitPayload } from "../../../bridge/contract.js";
 import { QWEN_DEFAULT_MODEL_ID, QWEN_DEFAULT_REGION_ID } from "../../../onboarding/presets/qwen.js";
 import type { RendererBridgeApi } from "../../bridge/renderer-api.js";
-import { submitOnboardingConfig } from "./submit-onboarding-config.js";
+import { executeConfigGateSubmit } from "./run-config-gate-submit.js";
+import { useWebToolsFormState } from "./use-web-tools-form-state.js";
 
 const DEFAULT_MODEL_REF: Record<string, string> = {
   qwen: "qwen/qwen3.7-plus",
@@ -30,6 +31,9 @@ export interface ConfigGateModel {
   qwenModel: string;
   qwenAdvancedOpen: boolean;
   qwenWorkspaceId: string;
+  enableWebSearch: boolean;
+  enableBrowser: boolean;
+  webSearchApiKey: string;
   submitting: boolean;
   phase: OnboardingPhase;
   error: string | null;
@@ -43,6 +47,9 @@ export interface ConfigGateModel {
   setQwenModel: (next: string) => void;
   setQwenAdvancedOpen: (next: boolean) => void;
   setQwenWorkspaceId: (next: string) => void;
+  setEnableWebSearch: (next: boolean) => void;
+  setEnableBrowser: (next: boolean) => void;
+  setWebSearchApiKey: (next: string) => void;
   submit: () => Promise<void>;
 }
 
@@ -63,15 +70,12 @@ export function useConfigGateModel(
   const [qwenModel, setQwenModel] = useState(QWEN_DEFAULT_MODEL_ID);
   const [qwenAdvancedOpen, setQwenAdvancedOpen] = useState(false);
   const [qwenWorkspaceId, setQwenWorkspaceId] = useState("");
+  const webTools = useWebToolsFormState();
   const [submitting, setSubmitting] = useState(false);
   const [phase, setPhase] = useState<OnboardingPhase>("verifying_key");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    return bridge.onboarding.subscribeProgress((next) => {
-      setPhase(next);
-    });
-  }, [bridge]);
+  useEffect(() => bridge.onboarding.subscribeProgress(setPhase), [bridge]);
 
   return {
     provider,
@@ -82,15 +86,16 @@ export function useConfigGateModel(
     qwenModel,
     qwenAdvancedOpen,
     qwenWorkspaceId,
+    enableWebSearch: webTools.enableWebSearch,
+    enableBrowser: webTools.enableBrowser,
+    webSearchApiKey: webTools.webSearchApiKey,
     submitting,
     phase,
     error,
     needsEndpoint: provider === "openai-compatible" || provider === "local",
     needsKey: provider !== "local",
     changeProvider(next) {
-      if (submitting) {
-        return;
-      }
+      if (submitting) return;
       setProvider(next);
       setModelRef(DEFAULT_MODEL_REF[next] ?? DEFAULT_MODEL_REF.openai ?? "openai/gpt-5.5");
       setError(null);
@@ -102,40 +107,33 @@ export function useConfigGateModel(
     setQwenModel,
     setQwenAdvancedOpen,
     setQwenWorkspaceId,
+    setEnableWebSearch: webTools.setEnableWebSearch,
+    setEnableBrowser: webTools.setEnableBrowser,
+    setWebSearchApiKey: webTools.setWebSearchApiKey,
     async submit() {
-      if (submitting) {
-        return;
-      }
+      if (submitting) return;
       setSubmitting(true);
       setPhase("verifying_key");
       setError(null);
-      try {
-        const outcome = await submitOnboardingConfig(
+      await executeConfigGateSubmit(
+        {
           bridge,
           provider,
-          {
-            apiKey,
-            regionId: qwenRegion,
-            modelId: qwenModel,
-            advancedOpen: qwenAdvancedOpen,
-            workspaceId: qwenWorkspaceId,
-          },
-          { apiKey, endpoint, modelRef },
-        );
-        if (!outcome.ok) {
-          setError(outcome.message);
-          return;
-        }
-        if (!outcome.result.ok) {
-          setError(outcome.result.error?.message ?? "配置失败，请检查后重试");
-          return;
-        }
-        onConfigured();
-      } catch {
-        setError("提交失败：主进程未响应，请重启 Companion");
-      } finally {
-        setSubmitting(false);
-      }
+          apiKey,
+          endpoint,
+          modelRef,
+          qwenRegion,
+          qwenModel,
+          qwenAdvancedOpen,
+          qwenWorkspaceId,
+          enableWebSearch: webTools.enableWebSearch,
+          enableBrowser: webTools.enableBrowser,
+          webSearchApiKey: webTools.webSearchApiKey,
+        },
+        setError,
+        onConfigured,
+      );
+      setSubmitting(false);
     },
   };
 }

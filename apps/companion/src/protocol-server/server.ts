@@ -44,6 +44,8 @@ export interface CompanionProtocolServerOptions {
   onSessionAccepted?: () => void;
   /** 协议落盘日志；只记录 redacted DTO 与状态证据 */
   logger?: Logger;
+  /** OpenClaw 工具能力探针（job.create 预检） */
+  getOpenClawToolCapabilities?: () => import("../gateway-runtime/openclaw-capability.js").OpenClawToolCapabilitySummary;
 }
 
 /**

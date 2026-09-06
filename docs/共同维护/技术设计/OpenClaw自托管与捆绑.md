@@ -48,6 +48,16 @@
 
 apiKey 使用 env ref，明文只经子进程环境变量注入，不落配置文件。
 
+用户在 onboarding **明确勾选**后，可额外写入最小网页能力（默认关闭，避免静默扩大攻击面）：
+
+- `tools.web.search.enabled=true` + `provider`（如 brave）
+- `tools.alsoAllow` 含 `group:web` / `browser`
+- `browser.enabled=true`（可选）
+
+Brave Search key 仅经子进程环境变量 `BRAVE_API_KEY` 注入，**不入** `openclaw.json`。工具可用 ≠ companion 自动授权；每次 job 仍过 permission gate。
+
+建单前 companion 会读当前 `openclaw.json` 做配置级能力探针：联网/浏览器意图若能力未就绪，`job.create` 返回 `capability_missing`（`nextStep=configure_openclaw_web_tools`），不得授权后才首次失败。诊断页 probeId：`openclaw.web_search`、`openclaw.browser`。
+
 ## 5. Gateway 线协议（协议版本 4）与 adapter 校准
 
 - 握手：WS 打开后服务端先发事件 `connect.challenge { nonce }`；客户端回 `req method="connect"`，params 含 `minProtocol/maxProtocol=4`、`role="operator"`、`scopes=["operator.read","operator.write"]`、`client { id: "gateway-client", mode: "backend", ... }`、`auth { token }`。client.id 有白名单，自定义 id 会被拒绝。缺 `operator.write` 时 `agent` RPC 返回 `missing scope: operator.write`。这些是 OpenClaw Gateway 控制面 scope，不是澜星 `workspace.read` 权限 id。修改 handshake 后必须**重启 Companion 进程**才会加载新 transport；只重跑配置门探针不够。

@@ -27,6 +27,12 @@ export interface BuildDiagnosticReportInput {
   recentServerErrorCode?: string | null;
   /** 最近错误 */
   lastError?: DiagnosticReportView["lastError"];
+  /** OpenClaw web_search 是否 ready（配置级） */
+  openClawWebSearchReady?: boolean;
+  /** OpenClaw browser 是否 ready（配置级） */
+  openClawBrowserReady?: boolean;
+  /** OpenClaw 能力摘要文案；无密钥 */
+  openClawCapabilityDetail?: string | null;
 }
 
 /**
@@ -73,6 +79,7 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): D
       input.lanDiscoveryReady ? "ready" : "not verified",
       "真实电话联调前需确认局域网发现",
     ),
+    ...openClawToolProbes(input),
   ] satisfies DiagnosticProbeView[];
   if (input.recentServerErrorCode) {
     services.push(probe(
@@ -126,6 +133,36 @@ function probe(
   hint: string | null,
 ): DiagnosticProbeView {
   return { probeId, label, category, status, detail, hint };
+}
+
+/**
+ * OpenClaw 工具能力探针（从主报告拆出以降复杂度）。
+ *
+ * @param input 诊断输入
+ * @returns probes
+ */
+function openClawToolProbes(input: BuildDiagnosticReportInput): DiagnosticProbeView[] {
+  const searchDetail = input.openClawWebSearchReady
+    ? input.openClawCapabilityDetail ?? "ready"
+    : "not configured";
+  return [
+    probe(
+      "openclaw.web_search",
+      "OpenClaw web_search",
+      "environment",
+      input.openClawWebSearchReady ? "ok" : "warn",
+      searchDetail,
+      input.openClawWebSearchReady ? null : "在 onboarding 勾选网页能力并配置搜索 key 后重试",
+    ),
+    probe(
+      "openclaw.browser",
+      "OpenClaw browser",
+      "environment",
+      input.openClawBrowserReady ? "ok" : "warn",
+      input.openClawBrowserReady ? "ready" : "not configured",
+      input.openClawBrowserReady ? null : "在 onboarding 勾选浏览器能力后重试；每次 job 仍需 companion 授权",
+    ),
+  ];
 }
 
 /**

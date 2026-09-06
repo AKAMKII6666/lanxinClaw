@@ -60,6 +60,50 @@ test("生成配置：qwen provider 含 baseUrl 与 model", () => {
   assert.ok(!text.includes("sk-"));
 });
 
+test("生成配置：可选 web/browser tools，不含密钥明文", () => {
+  const text = generateOpenClawConfig({
+    token: "local-token",
+    port: 19387,
+    modelRef: "openai/gpt-5.5",
+    providerId: "openai",
+    withApiKey: true,
+    baseUrl: null,
+    workspace: "C:/ws",
+    logFile: "C:/logs/openclaw.log",
+    webTools: {
+      enableWebSearch: true,
+      enableBrowser: true,
+      withWebSearchApiKey: true,
+    },
+  });
+  const config = JSON.parse(text) as {
+    tools?: { web?: { search?: { enabled?: boolean; provider?: string; apiKey?: string } }; alsoAllow?: string[] };
+    browser?: { enabled?: boolean };
+  };
+  assert.equal(config.tools?.web?.search?.enabled, true);
+  assert.equal(config.tools?.web?.search?.provider, "brave");
+  assert.equal(config.tools?.web?.search?.apiKey, undefined);
+  assert.ok(config.tools?.alsoAllow?.includes("browser"));
+  assert.equal(config.browser?.enabled, true);
+  assert.ok(!text.includes("sk-"));
+  assert.ok(!text.toLowerCase().includes("brave_api_key=secret"));
+});
+
+test("未勾选网页能力时不写 tools/browser", () => {
+  const text = generateOpenClawConfig({
+    token: "local-token",
+    port: 19387,
+    modelRef: "openai/gpt-5.5",
+    providerId: "openai",
+    withApiKey: true,
+    workspace: "C:/ws",
+    logFile: "C:/logs/openclaw.log",
+  });
+  const config = JSON.parse(text) as { tools?: unknown; browser?: unknown };
+  assert.equal(config.tools, undefined);
+  assert.equal(config.browser, undefined);
+});
+
 test("providerMeta 映射 provider → providerId/needsKey/baseUrl", () => {
   assert.deepEqual(providerMeta("openai", null), {
     providerId: "openai",

@@ -16,6 +16,12 @@ interface OnboardingFileRoot {
   endpoint: string | null;
   modelRef: string;
   updatedAt: string;
+  /** 可选：用户同意网页搜索 */
+  enableWebSearch?: boolean;
+  /** 可选：用户同意 browser */
+  enableBrowser?: boolean;
+  /** 可选：web search key 密文 */
+  webSearchApiKeyEncrypted?: string | null;
 }
 
 /** 配置存储 */
@@ -50,17 +56,31 @@ export function createFileOnboardingStore(
       if (apiKey === null || apiKey === "") {
         return null;
       }
+      const webSearchApiKey =
+        root.webSearchApiKeyEncrypted != null && root.webSearchApiKeyEncrypted !== ""
+          ? secrets.decrypt(root.webSearchApiKeyEncrypted) ?? ""
+          : "";
       return {
         provider: root.provider,
         apiKey,
         endpoint: root.endpoint,
         modelRef: root.modelRef ?? "openai/gpt-5.5",
+        enableWebSearch: root.enableWebSearch === true,
+        enableBrowser: root.enableBrowser === true,
+        webSearchApiKey,
       };
     },
     save(config) {
       const encrypted = secrets.encrypt(config.apiKey);
       if (encrypted === null) {
         throw new Error("onboarding_secrets_unavailable");
+      }
+      let webSearchApiKeyEncrypted: string | null = null;
+      if (config.webSearchApiKey && config.webSearchApiKey.trim()) {
+        webSearchApiKeyEncrypted = secrets.encrypt(config.webSearchApiKey.trim());
+        if (webSearchApiKeyEncrypted === null) {
+          throw new Error("onboarding_secrets_unavailable");
+        }
       }
       persistence.save({
         schemaVersion: 1,
@@ -69,6 +89,9 @@ export function createFileOnboardingStore(
         endpoint: config.endpoint,
         modelRef: config.modelRef,
         updatedAt: new Date().toISOString(),
+        enableWebSearch: config.enableWebSearch === true,
+        enableBrowser: config.enableBrowser === true,
+        webSearchApiKeyEncrypted,
       });
     },
     clear() {

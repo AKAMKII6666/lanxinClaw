@@ -1,14 +1,19 @@
 /**
- * job.create 入站门闩：affair 存在、jobId 幂等、seenMessages。
+ * job.create 入站门闩：affair 存在、jobId 幂等、seenMessages、OpenClaw 能力预检。
  *
  * 职责：在入队 permission 前校验 job.create 语义。
  * 不拥有：WS、gate 入队、出站广播。
  * 副作用：经 backend 写入 seenMessages（成功路径）。
  */
 
-import type { JobPayload, PermissionId, ProtocolEnvelope } from "@lanxin-claw/protocol";
+import type { JobPayload, ProtocolEnvelope } from "@lanxin-claw/protocol";
 import type { CompanionBackendRuntime } from "../backend/runtime.js";
 import type { PermissionGate } from "../permissions/gate/permission-gate.js";
+import {
+  classifyJobWebCapabilityNeed,
+  openClawCapabilitySatisfies,
+  type OpenClawToolCapabilitySummary,
+} from "../gateway-runtime/openclaw-capability.js";
 
 /** 并发 job.create 互斥（进程内） */
 const jobCreateClaims = new Set<string>();
@@ -17,18 +22,26 @@ const jobCreateClaims = new Set<string>();
 export type JobCreatePrecheckResult =
   | { ok: true; duplicate: false }
   | { ok: true; duplicate: true }
-  | { ok: false; code: string; message: string; retryable: false };
+  | { ok: false; code: string; message: string; retryable: false; nextStep?: string };
+
+/** 能力预检可选依赖 */
+export interface JobCreateCapabilityPort {
+  /** 读取 OpenClaw 工具能力；可空表示跳过能力门（测试） */
+  getOpenClawToolCapabilities?: () => OpenClawToolCapabilitySummary;
+}
 
 /**
- * 校验 affair 存在、jobId 幂等与 payload 冲突。
+ * 校验 affair 存在、jobId 幂等与 payload 冲突；联网意图校验 OpenClaw 能力。
  *
  * @param backend 后端 runtime
  * @param envelope 入站 job.create 消息
+ * @param capabilityPort 可选能力探针
  * @returns 预检结果
  */
 export function precheckJobCreate(
   backend: CompanionBackendRuntime,
   envelope: ProtocolEnvelope,
+  capabilityPort?: JobCreateCapabilityPort | null,
 ): JobCreatePrecheckResult {
   const state = backend.getState();
   if (state.seenMessages.has(envelope.messageId)) {
@@ -45,6 +58,10 @@ export function precheckJobCreate(
   }
   const existing = state.jobs.get(payload.jobId);
   if (!existing) {
+    const capabilityError = precheckOpenClawCapability(payload, capabilityPort);
+    if (capabilityError) {
+      return capabilityError;
+    }
     return { ok: true, duplicate: false };
   }
   if (!isEquivalentJobCreate(existing, payload)) {
@@ -56,6 +73,38 @@ export function precheckJobCreate(
     };
   }
   return { ok: true, duplicate: true };
+}
+
+function precheckOpenClawCapability(
+  payload: JobPayload,
+  capabilityPort?: JobCreateCapabilityPort | null,
+): JobCreatePrecheckResult | null {
+  if (!capabilityPort?.getOpenClawToolCapabilities) {
+    return null;
+  }
+  // 探索类只读任务不拦；避免误杀本地列目录。
+  if (payload.purpose === "exploration") {
+    return null;
+  }
+  const need = classifyJobWebCapabilityNeed({
+    goal: payload.goal,
+    allowedPermissions: payload.allowedPermissions ?? [],
+  });
+  if (!need) {
+    return null;
+  }
+  const summary = capabilityPort.getOpenClawToolCapabilities();
+  if (openClawCapabilitySatisfies(summary, need)) {
+    return null;
+  }
+  return {
+    ok: false,
+    code: "capability_missing",
+    message:
+      "OpenClaw 网页/浏览器能力未配置或未就绪，无法创建联网执行 job。请在 companion onboarding 勾选网页能力并配置搜索 key。",
+    retryable: false,
+    nextStep: "configure_openclaw_web_tools",
+  };
 }
 
 /**

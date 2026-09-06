@@ -32,7 +32,9 @@ export async function handleJobCreate(
   input: HandleProtocolSocketMessageInput,
   parsed: ProtocolEnvelope,
 ): Promise<void> {
-  const precheck = precheckJobCreate(input.options.backend, parsed);
+  const precheck = precheckJobCreate(input.options.backend, parsed, {
+    getOpenClawToolCapabilities: input.options.getOpenClawToolCapabilities,
+  });
   if (!precheck.ok) {
     sendJson(input.socket, { ok: false, error: precheck });
     return;

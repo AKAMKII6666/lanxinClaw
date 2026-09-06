@@ -9,6 +9,21 @@
 /** 子进程注入的模型 key 环境变量名 */
 export const OPENCLAW_MODEL_KEY_ENV = "LANXIN_OPENCLAW_API_KEY";
 
+/** 子进程注入的 Brave web search key 环境变量名（不入 openclaw.json 明文） */
+export const OPENCLAW_BRAVE_KEY_ENV = "BRAVE_API_KEY";
+
+/** 可选网页/浏览器工具写入选项（需用户同意） */
+export interface OpenClawWebToolsConfigInput {
+  /** 启用 tools.web.search（默认 false，避免静默扩大攻击面） */
+  enableWebSearch: boolean;
+  /** 启用 browser + tools.alsoAllow browser（默认 false） */
+  enableBrowser: boolean;
+  /** web search provider；缺省 brave */
+  webSearchProvider?: string;
+  /** 是否声明 search apiKey 走 env ref（不写明文） */
+  withWebSearchApiKey?: boolean;
+}
+
 /** 生成配置入参 */
 export interface GenerateOpenClawConfigInput {
   /** 本地 gateway token */
@@ -27,6 +42,8 @@ export interface GenerateOpenClawConfigInput {
   workspace: string;
   /** OpenClaw 自身日志文件（JSON lines） */
   logFile: string;
+  /** 可选网页能力；未传则不写 tools/browser（保持默认关闭） */
+  webTools?: OpenClawWebToolsConfigInput | null;
 }
 
 /**
@@ -47,7 +64,7 @@ export function generateOpenClawConfig(input: GenerateOpenClawConfigInput): stri
   if (input.baseUrl?.trim()) {
     providerConfig.baseUrl = input.baseUrl.trim();
   }
-  const config = {
+  const config: Record<string, unknown> = {
     gateway: {
       mode: "local",
       bind: "loopback",
@@ -70,6 +87,34 @@ export function generateOpenClawConfig(input: GenerateOpenClawConfigInput): stri
       file: input.logFile,
     },
   };
+  const webTools = input.webTools;
+  if (webTools && (webTools.enableWebSearch || webTools.enableBrowser)) {
+    const tools: Record<string, unknown> = {};
+    if (webTools.enableWebSearch) {
+      const search: Record<string, unknown> = {
+        enabled: true,
+        provider: webTools.webSearchProvider?.trim() || "brave",
+      };
+      // API key 仅经进程 env（BRAVE_API_KEY）注入，不入 openclaw.json。
+      tools.web = { search };
+      tools.alsoAllow = Array.isArray(tools.alsoAllow)
+        ? [...(tools.alsoAllow as string[]), "group:web"]
+        : ["group:web"];
+    }
+    if (webTools.enableBrowser) {
+      const also = Array.isArray(tools.alsoAllow) ? [...(tools.alsoAllow as string[])] : [];
+      if (!also.includes("browser")) {
+        also.push("browser");
+      }
+      tools.alsoAllow = also;
+      config.browser = {
+        enabled: true,
+        defaultProfile: "openclaw",
+        headless: true,
+      };
+    }
+    config.tools = tools;
+  }
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
