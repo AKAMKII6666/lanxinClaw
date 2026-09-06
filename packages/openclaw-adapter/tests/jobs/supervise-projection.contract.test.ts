@@ -241,4 +241,78 @@ describe("supervise projection / empty completed gate", () => {
     assert.equal(next.status, "blocked");
     assert.equal(next.statusReasonCode, "openclaw.terminal_without_result");
   });
+
+  it("实机桌面清单无共有N个时仍 completed + present", () => {
+    const job = {
+      ...baseJob("running"),
+      goal: "列出当前用户桌面上所有可见的快捷方式和文件图标名称",
+    };
+    const digest =
+      "这是当前桌面上所有可见的文件和快捷方式名称： **文件夹:** - 新建文件夹 - 禹悦病例 - 资料 - ddu **应用程序和工具:** - 微软语音合成助手 1.5.1 - DiskGenius - monky - SecureCRT_Portable";
+    const next = applyRunSnapshotToJob(job, {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-09-06T05:47:50.000Z",
+        wait: { status: "ok", endedAt: "2026-09-06T05:47:50.000Z" },
+        lifecycle: { endedAt: "2026-09-06T05:47:50.000Z", terminalPhase: "end" },
+        toolFindings: [],
+        finalReply: { text: digest, source: "history", confidence: "medium" },
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+    assert.equal(next.status, "completed");
+    assert.equal(next.evidenceQuality, "present");
+    assert.match(next.resultDigest ?? "", /文件夹/);
+    assert.doesNotMatch(next.progressSummary, /没有返回可验收/);
+    assert.notEqual(next.statusReasonCode, "openclaw.terminal_without_result");
+  });
+
+  it("present digest 时不得保留没有可验收结果文案", () => {
+    const next = applyRunSnapshotToJob(
+      {
+        ...baseJob("running"),
+        goal: "扫描桌面图标",
+      },
+      {
+        runId: "run_apply",
+        status: "completed",
+        evidence: {
+          runId: "run_apply",
+          observedAt: "2026-09-06T05:50:00.000Z",
+          wait: { status: "ok", endedAt: "2026-09-06T05:50:00.000Z" },
+          lifecycle: { endedAt: "2026-09-06T05:50:00.000Z", terminalPhase: "end" },
+          toolFindings: [],
+          finalReply: {
+            text: "桌面上共有 **109** 个可见的快捷方式和文件图标，包括： **文件夹:** - 资料 - ddu",
+            source: "history",
+            confidence: "medium",
+          },
+          sourceStatuses: ["ok", "completed"],
+        },
+      },
+    );
+    assert.equal(next.status, "completed");
+    assert.equal(next.evidenceQuality, "present");
+    assert.doesNotMatch(next.progressSummary, /没有返回可验收/);
+    assert.equal(next.blockedReason, null);
+  });
+
+  it("裸斜杠不得抬到 present", () => {
+    const next = applyRunSnapshotToJob(baseJob("running"), {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-09-06T02:08:00.000Z",
+        wait: { status: "ok", endedAt: "2026-09-06T02:08:00.000Z" },
+        lifecycle: { endedAt: "2026-09-06T02:08:00.000Z", terminalPhase: "end" },
+        toolFindings: [],
+        finalReply: { text: "looked at a/b casually", source: "history", confidence: "medium" },
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+    assert.notEqual(next.evidenceQuality, "present");
+  });
 });

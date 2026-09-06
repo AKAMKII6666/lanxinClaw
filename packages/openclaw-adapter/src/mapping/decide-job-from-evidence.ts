@@ -16,6 +16,7 @@ import type { AdapterJobRecord } from "../jobs/job-types.js";
 import type { OpenClawRunStatus } from "../status/openclaw-run-status.js";
 import {
   blockingFindingKind,
+  classifyBusinessEvidence,
   classifyTask,
   containsBlockingText,
   failedFindingKind,
@@ -41,6 +42,7 @@ import {
   hasBusinessCompletionEvidence,
   hasMeaningfulTaskCompletion,
   hasNegativeToolFinding,
+  isTerminalWithoutBusinessResult,
 } from "./decision/completion-gate.js";
 import { buildSuperviseProjection } from "./decision/supervise-projection.js";
 
@@ -141,7 +143,7 @@ function terminalJobRule(context: DecisionContext): OpenClawToLanxinJobDecision 
   if (isHollowCompletedJob(job)) {
     return null;
   }
-  return decision(job.status, evidence, {
+  return decide(context, job.status, {
     kind: "lanxin.terminal_latch",
     strength: "strong",
     reasonCode: "lanxin.terminal_latch",
@@ -173,7 +175,7 @@ function cancellationRule(context: DecisionContext): OpenClawToLanxinJobDecision
   if (!evidence.localCancelAck && rawRunStatus !== "cancelled" && !hasCancelledFinding(evidence)) {
     return null;
   }
-  return decision("canceled", evidence, {
+  return decide(context, "canceled", {
     kind: "local.cancel_ack",
     strength: "strong",
     reasonCode: "openclaw.cancel_ack",
@@ -192,7 +194,7 @@ function blockingFindingRule(context: DecisionContext): OpenClawToLanxinJobDecis
   const reason = safeText(
     finding.summary ?? finding.errorCode ?? summaryFromEvidence(context.evidence, "OpenClaw 执行被阻塞"),
   );
-  return decision("blocked", context.evidence, {
+  return decide(context, "blocked", {
     kind: blockingFindingKind(finding),
     strength: "strong",
     reasonCode: "openclaw.blocked_by_tool_or_policy",
@@ -207,7 +209,7 @@ function waitingApprovalRule(context: DecisionContext): OpenClawToLanxinJobDecis
   if (context.rawRunStatus !== "waiting_approval") {
     return null;
   }
-  return decision("needs_permission", context.evidence, {
+  return decide(context, "needs_permission", {
     kind: "wait.waiting_approval",
     strength: "medium",
     reasonCode: "openclaw.waiting_approval",
@@ -224,7 +226,7 @@ function negativeFinalReplyRule(context: DecisionContext): OpenClawToLanxinJobDe
     return null;
   }
   const reason = safeText(evidence.finalReply?.text ?? "OpenClaw 结束但最终回复显示目标未完成");
-  return decision("blocked", evidence, {
+  return decide(context, "blocked", {
     kind: "history.negative_final_reply",
     strength: evidence.finalReply?.confidence === "medium" ? "medium" : "weak",
     reasonCode: "openclaw.final_reply_negative",
@@ -243,7 +245,7 @@ function failedFindingRule(context: DecisionContext): OpenClawToLanxinJobDecisio
   const reason = safeText(
     finding.summary ?? finding.errorCode ?? summaryFromEvidence(context.evidence, "OpenClaw 工具执行失败"),
   );
-  return decision("failed", context.evidence, {
+  return decide(context, "failed", {
     kind: failedFindingKind(finding),
     strength: "strong",
     reasonCode: finding.status === "timed_out" ? "openclaw.tool_timed_out" : "openclaw.tool_failed",
@@ -259,7 +261,7 @@ function taskBlockedRule(context: DecisionContext): OpenClawToLanxinJobDecision 
     return null;
   }
   const reason = summaryFromEvidence(context.evidence, "OpenClaw task ledger 显示任务被阻塞");
-  return decision("blocked", context.evidence, {
+  return decide(context, "blocked", {
     kind: "task.blocked",
     strength: "medium",
     reasonCode: "openclaw.task_blocked",
@@ -275,7 +277,7 @@ function taskFailedRule(context: DecisionContext): OpenClawToLanxinJobDecision |
     return null;
   }
   const reason = summaryFromEvidence(context.evidence, "OpenClaw task ledger 显示任务失败");
-  return decision("failed", context.evidence, {
+  return decide(context, "failed", {
     kind: "task.failed",
     strength: "medium",
     reasonCode: "openclaw.task_failed",
@@ -293,7 +295,7 @@ function runFailedRule(context: DecisionContext): OpenClawToLanxinJobDecision | 
   }
   const reason = summaryFromEvidence(evidence, "OpenClaw run 执行失败");
   const isBlocked = containsBlockingText(reason) || containsBlockingText(evidence.wait?.error);
-  return decision(isBlocked ? "blocked" : "failed", evidence, {
+  return decide(context, isBlocked ? "blocked" : "failed", {
     kind: "wait.failed",
     strength: "medium",
     reasonCode: isBlocked ? "openclaw.run_blocked" : "openclaw.run_failed",
@@ -310,7 +312,7 @@ function lifecycleFailedRule(context: DecisionContext): OpenClawToLanxinJobDecis
   }
   const reason = summaryFromEvidence(context.evidence, "OpenClaw lifecycle 显示执行失败");
   const isBlocked = containsBlockingText(reason) || containsBlockingText(context.evidence.lifecycle?.terminalReason);
-  return decision(isBlocked ? "blocked" : "failed", context.evidence, {
+  return decide(context, isBlocked ? "blocked" : "failed", {
     kind: "audit.failed",
     strength: "medium",
     reasonCode: isBlocked ? "openclaw.lifecycle_blocked" : "openclaw.lifecycle_failed",
@@ -327,7 +329,7 @@ function terminalTimeoutRule(context: DecisionContext): OpenClawToLanxinJobDecis
     return null;
   }
   const reason = summaryFromEvidence(evidence, "OpenClaw run 已终止于超时");
-  return decision("failed", evidence, {
+  return decide(context, "failed", {
     kind: "wait.timeout",
     strength: "medium",
     reasonCode: "openclaw.run_terminal_timeout",
@@ -339,7 +341,7 @@ function terminalTimeoutRule(context: DecisionContext): OpenClawToLanxinJobDecis
 }
 
 function completedRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
-  const { evidence, taskOutcome } = context;
+  const { evidence, job } = context;
   if (!hasTerminalSuccessSignal(context)) {
     return null;
   }
@@ -349,10 +351,12 @@ function completedRule(context: DecisionContext): OpenClawToLanxinJobDecision | 
   if (!hasBusinessCompletionEvidence(context)) {
     return null;
   }
+  const classified = classifyBusinessEvidence(evidence, { goal: job.goal });
   const summary =
-    pickMeaningfulBusinessText(evidence, null) ??
+    classified.text ??
+    pickMeaningfulBusinessText(evidence, null, job.goal) ??
     summaryFromEvidence(evidence, "OpenClaw 已返回可验收结果");
-  return decision("completed", evidence, {
+  return decide(context, "completed", {
     kind: hasMeaningfulTaskCompletion(evidence) ? "task.completed" : "wait.completed",
     strength: "medium",
     reasonCode: "openclaw.run_completed",
@@ -364,11 +368,11 @@ function completedRule(context: DecisionContext): OpenClawToLanxinJobDecision | 
 }
 
 function terminalWithoutResultRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
-  if (!hasTerminalSuccessSignal(context) || hasBusinessCompletionEvidence(context)) {
+  if (!hasTerminalSuccessSignal(context) || !isTerminalWithoutBusinessResult(context)) {
     return null;
   }
   const reason = "OpenClaw 已结束，但没有返回可验收的任务结果；需要张老板复验或换一种执行方式";
-  return decision("blocked", context.evidence, {
+  return decide(context, "blocked", {
     kind: "wait.ended_without_result",
     strength: "medium",
     reasonCode: "openclaw.terminal_without_result",
@@ -391,7 +395,7 @@ function acceptedRule(context: DecisionContext): OpenClawToLanxinJobDecision | n
   if (context.rawRunStatus !== "accepted") {
     return null;
   }
-  return decision("running", context.evidence, {
+  return decide(context, "running", {
     kind: "create.accepted",
     strength: "medium",
     reasonCode: "openclaw.accepted",
@@ -406,7 +410,7 @@ function waitOnlyTimeoutRule(context: DecisionContext): OpenClawToLanxinJobDecis
   if (!isWaitOnlyTimeout(context.evidence)) {
     return null;
   }
-  return decision("running", context.evidence, {
+  return decide(context, "running", {
     kind: "wait.timeout",
     strength: "medium",
     reasonCode: "openclaw.wait_timeout_observing",
@@ -418,7 +422,7 @@ function waitOnlyTimeoutRule(context: DecisionContext): OpenClawToLanxinJobDecis
 }
 
 function runningDecision(context: DecisionContext): OpenClawToLanxinJobDecision {
-  return decision("running", context.evidence, {
+  return decide(context, "running", {
     kind: "wait.running",
     strength: "medium",
     reasonCode: context.rawRunStatus === "running" ? "openclaw.running" : "openclaw.insufficient_evidence",
@@ -429,9 +433,9 @@ function runningDecision(context: DecisionContext): OpenClawToLanxinJobDecision 
   });
 }
 
-function decision(
+function decide(
+  context: DecisionContext,
   status: JobStatus,
-  evidence: OpenClawExecutionEvidence,
   input: {
     kind: OpenClawEvidenceKind;
     strength: OpenClawEvidenceStrength;
@@ -442,18 +446,37 @@ function decision(
     rawRunStatus?: string | null;
   },
 ): OpenClawToLanxinJobDecision {
+  const evidence = context.evidence;
+  const goal = context.job.goal;
   let progressSummary = safeText(input.summary);
   if (isLowSignalText(progressSummary)) {
     progressSummary =
-      pickMeaningfulBusinessText(evidence, null) ?? humanProgressFallback(status);
+      pickMeaningfulBusinessText(evidence, null, goal) ?? humanProgressFallback(status);
   }
-  const projection = buildSuperviseProjection(evidence, status, progressSummary);
+  const classified = classifyBusinessEvidence(evidence, { goal, fallback: progressSummary });
+  if (
+    classified.quality === "present" &&
+    classified.text &&
+    /没有返回可验收/.test(progressSummary)
+  ) {
+    progressSummary = classified.text;
+  }
+  let blockedReason = input.blockedReason === null ? null : safeText(input.blockedReason);
+  if (classified.quality === "present" && blockedReason && /没有返回可验收/.test(blockedReason)) {
+    blockedReason = null;
+  }
+  // present 时不得保留空壳纠错理由码。
+  let statusReasonCode = input.reasonCode;
+  if (classified.quality === "present" && statusReasonCode === "openclaw.terminal_without_result") {
+    statusReasonCode = "openclaw.run_completed";
+  }
+  const projection = buildSuperviseProjection(evidence, status, progressSummary, { goal });
   return {
     status,
     progressSummary,
-    blockedReason: input.blockedReason === null ? null : safeText(input.blockedReason),
+    blockedReason,
     resumeCondition: input.resumeCondition === null ? null : safeText(input.resumeCondition),
-    statusReasonCode: input.reasonCode,
+    statusReasonCode,
     statusObservedAt: evidence.observedAt,
     evidenceKind: input.kind,
     evidenceStrength: input.strength,

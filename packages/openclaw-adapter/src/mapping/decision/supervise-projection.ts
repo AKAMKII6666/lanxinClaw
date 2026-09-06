@@ -9,10 +9,8 @@
 import type { JobEvidenceQuality, JobRecentStep, JobRecentStepKind, JobStatus } from "@lanxin-claw/protocol";
 import type { OpenClawExecutionEvidence, OpenClawToolFinding } from "../../evidence/openclaw-execution-evidence.js";
 import {
-  hasBusinessEntitySignal,
+  classifyBusinessEvidence,
   isLowSignalText,
-  isMeaningfulCompletionText,
-  pickMeaningfulBusinessText,
   safeText,
 } from "./evidence-helpers.js";
 
@@ -29,49 +27,70 @@ export interface SuperviseProjection {
 const MAX_RECENT_STEPS = 8;
 const MAX_STEP_TEXT = 240;
 
+/** 投影可选上下文。 */
+export interface SuperviseProjectionOptions {
+  /** job 目标；与门闩共用列举语境判定。 */
+  goal?: string | null;
+}
+
 /**
- * 从证据生成监督投影。
+ * 从证据生成监督投影（与完成门闩共用 classifyBusinessEvidence）。
  *
  * @param evidence OpenClaw 观测证据
  * @param status 已裁决的 Lanxin job 状态
  * @param progressSummary 已归一的进度摘要
+ * @param options 可选目标
  * @returns 监督投影
  */
 export function buildSuperviseProjection(
   evidence: OpenClawExecutionEvidence,
   status: JobStatus,
   progressSummary: string,
+  options?: SuperviseProjectionOptions,
 ): SuperviseProjection {
   const recentSteps = collectRecentSteps(evidence);
-  const business = pickMeaningfulBusinessText(evidence, progressSummary);
+  const classified = classifyBusinessEvidence(evidence, {
+    goal: options?.goal ?? null,
+    fallback: progressSummary,
+  });
 
-  if (status === "completed") {
-    if (!business) {
-      return { recentSteps, resultDigest: null, evidenceQuality: "missing" };
-    }
-    if (hasBusinessEntitySignal(business)) {
-      return { recentSteps, resultDigest: business, evidenceQuality: "present" };
-    }
-    return { recentSteps, resultDigest: business, evidenceQuality: "weak" };
-  }
-
-  if (status === "blocked" || status === "failed") {
-    const digest =
-      business ?? (isMeaningfulCompletionText(progressSummary) ? safeText(progressSummary) : null);
-    if (!digest) {
+  if (status === "canceled") {
+    if (classified.quality !== "present") {
       return { recentSteps, resultDigest: null, evidenceQuality: "weak" };
     }
     return {
       recentSteps,
-      resultDigest: digest,
-      evidenceQuality: hasBusinessEntitySignal(digest) ? "present" : "weak",
+      resultDigest: classified.text,
+      evidenceQuality: "present",
+    };
+  }
+
+  if (status === "completed") {
+    if (!classified.text || classified.quality === "missing") {
+      return { recentSteps, resultDigest: null, evidenceQuality: "missing" };
+    }
+    return {
+      recentSteps,
+      resultDigest: classified.text,
+      evidenceQuality: classified.quality,
+    };
+  }
+
+  if (status === "blocked" || status === "failed") {
+    if (!classified.text || classified.quality === "missing") {
+      return { recentSteps, resultDigest: null, evidenceQuality: "weak" };
+    }
+    return {
+      recentSteps,
+      resultDigest: classified.text,
+      evidenceQuality: classified.quality,
     };
   }
 
   return {
     recentSteps,
     resultDigest: null,
-    evidenceQuality: business || recentSteps.length > 0 ? "weak" : "missing",
+    evidenceQuality: classified.text || recentSteps.length > 0 ? "weak" : "missing",
   };
 }
 
