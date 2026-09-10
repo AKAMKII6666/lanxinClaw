@@ -12,7 +12,7 @@ import {
 } from "../../../protocol-server/harness.js";
 
 describe("job.create transaction", () => {
-  it("成功 ack 后 store=needs_permission 且 gate 有 pending", { timeout: 10000 }, async () => {
+  it("成功 ack 后仍 pending：等待用户授权", { timeout: 10000 }, async () => {
     const { backend, identityStore, server, socket } = await startHarness();
     const reader = createJsonReader(socket);
     await openSession(socket, reader, identityStore);
@@ -58,11 +58,10 @@ describe("job.create transaction", () => {
     }
     assert.ok(ack);
     assert.equal(ack!.ok, true);
-    assert.equal(backend.getState().jobs.get("job_tx_ok")?.status, "needs_permission");
     assert.equal(backend.getState().affairs.get("affair_tx")?.status, "delegated");
     assert.equal(backend.getState().affairs.get("affair_tx")?.currentJobId, "job_tx_ok");
-    assert.equal(backend.getSnapshot().currentAffair?.currentJobStatus, "needs_permission");
     assert.equal(backend.getPermissionGate().hasPendingForJob("job_tx_ok"), true);
+    assert.equal(backend.listPendingPermissionCards().length, 1);
 
     socket.close();
     await server.close();

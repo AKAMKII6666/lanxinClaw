@@ -46,7 +46,7 @@ test("联网 job 在能力缺失时返回 capability_missing", () => {
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.equal(result.code, "capability_missing");
-    assert.equal(result.nextStep, "configure_openclaw_web_tools");
+    assert.equal(result.nextStep, "configure_openclaw_browser");
   }
 });
 

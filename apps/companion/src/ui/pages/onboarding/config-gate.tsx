@@ -33,9 +33,6 @@ export function ConfigGate(props: {
       qwenModel={model.qwenModel}
       qwenAdvancedOpen={model.qwenAdvancedOpen}
       qwenWorkspaceId={model.qwenWorkspaceId}
-      enableWebSearch={model.enableWebSearch}
-      enableBrowser={model.enableBrowser}
-      webSearchApiKey={model.webSearchApiKey}
       submitting={model.submitting}
       phase={model.phase}
       error={model.error}
@@ -49,9 +46,6 @@ export function ConfigGate(props: {
       onQwenModelChange={model.setQwenModel}
       onQwenAdvancedOpenChange={model.setQwenAdvancedOpen}
       onQwenWorkspaceIdChange={model.setQwenWorkspaceId}
-      onEnableWebSearchChange={model.setEnableWebSearch}
-      onEnableBrowserChange={model.setEnableBrowser}
-      onWebSearchApiKeyChange={model.setWebSearchApiKey}
       onSubmit={() => void model.submit()}
     />
   );

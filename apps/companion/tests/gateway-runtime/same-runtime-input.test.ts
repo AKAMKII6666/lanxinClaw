@@ -35,3 +35,24 @@ test("web search key 变更视为配置变更", () => {
     false,
   );
 });
+
+test("浏览器代理开关或 URL 变更视为配置变更", () => {
+  assert.equal(
+    sameGatewayRuntimeInput(base, { ...base, browserProxyEnabled: true, browserProxyUrl: "http://127.0.0.1:7890" }),
+    false,
+  );
+  assert.equal(
+    sameGatewayRuntimeInput(
+      { ...base, browserProxyEnabled: true, browserProxyUrl: "http://127.0.0.1:7890" },
+      { ...base, browserProxyEnabled: true, browserProxyUrl: "http://127.0.0.1:7891" },
+    ),
+    false,
+  );
+  assert.equal(
+    sameGatewayRuntimeInput(
+      { ...base, browserProxyEnabled: true, browserProxyUrl: "http://127.0.0.1:7890" },
+      { ...base, browserProxyEnabled: true, browserProxyUrl: "http://127.0.0.1:7890" },
+    ),
+    true,
+  );
+});

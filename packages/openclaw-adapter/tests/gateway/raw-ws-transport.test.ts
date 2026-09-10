@@ -82,7 +82,7 @@ describe("raw websocket gateway transport (protocol v4)", () => {
       const agentParams = agentFrame?.params as { message?: string; idempotencyKey?: string; sessionKey?: string };
       assert.equal(agentParams.message, "read only");
       assert.equal(agentParams.idempotencyKey, "lanxing-job:job_001");
-      assert.equal(agentParams.sessionKey, "lanxing-job:job_001");
+      assert.equal(agentParams.sessionKey, "agent:main:lanxing-job:job_001");
 
       const waitFrame = frames.find((f) => f.method === "agent.wait");
       const waitParams = waitFrame?.params as { runId?: string; timeoutMs?: number };
@@ -91,7 +91,39 @@ describe("raw websocket gateway transport (protocol v4)", () => {
       const abortFrame = frames.find((f) => f.method === "chat.abort");
       const abortParams = abortFrame?.params as { runId?: string; sessionKey?: string };
       assert.equal(abortParams.runId, "gw_run_001");
-      assert.equal(abortParams.sessionKey, "lanxing-job:job_001");
+      assert.equal(abortParams.sessionKey, "agent:main:lanxing-job:job_001");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("chat.abort 将裸 sessionKey 规范为 agent:main:lanxing-job:…", async () => {
+    const frames: Array<Record<string, unknown>> = [];
+    const server = await startProtocolV4Server((frame) => {
+      frames.push(frame);
+      if (frame.method === "connect") {
+        return { type: "hello-ok", protocol: 4, server: { version: "x", connId: "c" } };
+      }
+      if (frame.method === "chat.abort") {
+        return { ok: true };
+      }
+      throw new GatewayTransportError("gateway_test_unexpected", `unexpected method ${String(frame.method)}`, false);
+    });
+    try {
+      const transport = createRawWebSocketGatewayTransport({
+        gatewayUrl: server.url,
+        authProvider: () => "t",
+        timeoutMs: 1000,
+      });
+      await transport.cancelRun("gw_run_legacy", {
+        jobId: "job_legacy",
+        affairId: "affair_legacy",
+        sessionKey: "lanxing-job:job_legacy",
+      });
+      const abortFrame = frames.find((f) => f.method === "chat.abort");
+      const abortParams = abortFrame?.params as { runId?: string; sessionKey?: string };
+      assert.equal(abortParams.runId, "gw_run_legacy");
+      assert.equal(abortParams.sessionKey, "agent:main:lanxing-job:job_legacy");
     } finally {
       await server.close();
     }

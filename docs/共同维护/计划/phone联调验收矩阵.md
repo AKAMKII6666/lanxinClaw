@@ -62,7 +62,7 @@
 | 4.2 | 权限范围 | workspaceHint 越界拒绝（workspace_scope_mismatch） |
 | 4.3 | 授权权威 | 决策只在 companion gate；renderer 不能自行授予 |
 | 4.4 | 审计 | 权限/配对/job 关键动作入审计，无凭据明文 |
-| 4.5 | 联网任务权限推断 | phone 创建新闻/搜索/网页任务时自动携带 `network.access`；不自动扩大到 `desktop.control` |
+| 4.5 | 联网/查资料任务权限推断 | 查价、搜新闻、上网查资料、打开网页等意图：`permission.request` 须含 `network.access` + `desktop.control`；phone 若只带 `network.access`，companion 在弹权前可见补全（用户确认，非静默授权） |
 
 ## 5. 聊天
 

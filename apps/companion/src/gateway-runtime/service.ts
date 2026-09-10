@@ -78,6 +78,10 @@ export interface StartGatewayRuntimeInput {
   enableBrowser?: boolean;
   /** web search API key（仅 env，不入 json） */
   webSearchApiKey?: string;
+  /** 托管浏览器走本地代理；默认 false */
+  browserProxyEnabled?: boolean;
+  /** 本地代理 URL */
+  browserProxyUrl?: string | null;
 }
 
 /** 运行句柄 */
@@ -241,14 +245,13 @@ export class GatewayRuntimeService {
       baseUrl: meta.baseUrl,
       workspace: input.workspace,
       logFile,
-      webTools:
-        input.enableWebSearch || input.enableBrowser
-          ? {
-              enableWebSearch: input.enableWebSearch === true,
-              enableBrowser: input.enableBrowser === true,
-              withWebSearchApiKey: Boolean(input.webSearchApiKey?.trim()),
-            }
-          : null,
+      webTools: {
+        enableWebSearch: input.enableWebSearch === true,
+        enableBrowser: true,
+        withWebSearchApiKey: Boolean(input.webSearchApiKey?.trim()),
+        browserProxyEnabled: input.browserProxyEnabled === true,
+        browserProxyUrl: input.browserProxyUrl ?? null,
+      },
     });
     fs.writeFileSync(path.join(stateDir, "openclaw.json"), configText, "utf8");
 
@@ -260,6 +263,27 @@ export class GatewayRuntimeService {
     }
     if (input.webSearchApiKey?.trim()) {
       env[OPENCLAW_BRAVE_KEY_ENV] = input.webSearchApiKey.trim();
+    }
+    const proxyUrl = input.browserProxyUrl?.trim() ?? "";
+    if (input.browserProxyEnabled === true && proxyUrl) {
+      // 与 browser.extraArgs 同源；覆盖父进程残留，供 web_fetch useTrustedEnvProxy 使用。
+      env.HTTP_PROXY = proxyUrl;
+      env.HTTPS_PROXY = proxyUrl;
+      env.http_proxy = proxyUrl;
+      env.https_proxy = proxyUrl;
+      // 模型 API 不得被本机死代理拖死（Clash 未开时常见）。
+      const noProxy =
+        "127.0.0.1,localhost,::1,.aliyuncs.com,dashscope.aliyuncs.com,.openai.com,api.openai.com";
+      env.NO_PROXY = noProxy;
+      env.no_proxy = noProxy;
+    } else {
+      // 显式清空，避免 ...process.env 继承系统/父进程代理。
+      env.HTTP_PROXY = "";
+      env.HTTPS_PROXY = "";
+      env.http_proxy = "";
+      env.https_proxy = "";
+      env.NO_PROXY = "";
+      env.no_proxy = "";
     }
     const managerOptions: GatewayRuntimeManagerOptions = {
       openclawEntry: this.options.openclawEntry,

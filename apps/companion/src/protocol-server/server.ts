@@ -8,69 +8,22 @@
 
 import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { Logger } from "pino";
 import { createEnvelope, type ProtocolEnvelope } from "@lanxin-claw/protocol";
-import type { PairingLifecycleDeps } from "../pairing/lifecycle.js";
 import type { PairingSession } from "../pairing/session.js";
-import type { DeviceIdentityStore } from "../credentials/identity-store.js";
-import type { CompanionBackendRuntime } from "../backend/runtime.js";
 import type { ApplyProtocolResult } from "../state/types.js";
 import { approvePendingPairing, handleProtocolSocketMessage } from "./router.js";
 import { isLoopbackAddress } from "./guards/http/http-guard.js";
 import { shouldSendEnvelopeToSocket } from "./guards/ws/ws-audience.js";
 import { createProtocolLogDto } from "./protocol-log-dto.js";
+import type {
+  CompanionProtocolServerHandle,
+  CompanionProtocolServerOptions,
+} from "./server-types.js";
 
-/**
- * Server 选项。
- */
-export interface CompanionProtocolServerOptions {
-  /** 监听端口；0 表示随机端口 */
-  port?: number;
-  /** 监听 host；默认 127.0.0.1 */
-  host?: string;
-  /** backend runtime */
-  backend: CompanionBackendRuntime;
-  /** identity store */
-  identityStore: DeviceIdentityStore;
-  /** pairing 依赖 */
-  pairing: PairingLifecycleDeps;
-  /** 心跳间隔毫秒；缺省 5000（与 session.accepted 广播一致） */
-  heartbeatIntervalMs?: number;
-  /** 连续错过多少次心跳判定超时；缺省 3 */
-  missedHeartbeats?: number;
-  /** job.cancel 处理器（真正取消 OpenClaw run）；缺省仅状态闭环 */
-  onJobCancel?: (input: { jobId: string; affairId: string }) => Promise<void>;
-  /** session.accepted 之后回调（flush pending context） */
-  onSessionAccepted?: () => void;
-  /** 协议落盘日志；只记录 redacted DTO 与状态证据 */
-  logger?: Logger;
-  /** OpenClaw 工具能力探针（job.create 预检） */
-  getOpenClawToolCapabilities?: () => import("../gateway-runtime/openclaw-capability.js").OpenClawToolCapabilitySummary;
-}
-
-/**
- * Server 句柄。
- */
-export interface CompanionProtocolServerHandle {
-  /** HTTP base URL */
-  baseUrl: string;
-  /** WebSocket URL */
-  wsUrl: string;
-  /** 实际监听端口 */
-  port: number;
-  /** 广播协议 envelope（先 apply backend，再发客户端）；apply 失败时不 send */
-  broadcast: (envelope: ProtocolEnvelope) => ApplyProtocolResult;
-  /** 仅 WS 发送（假定 backend 已 apply） */
-  sendEnvelope: (envelope: ProtocolEnvelope) => void;
-  /** session.open 成功时替换为单活 authenticated socket */
-  replaceAuthenticatedSocket: (socket: WebSocket) => void;
-  /** 清除全部已认证 socket（配对撤销/会话关闭） */
-  clearAuthenticatedSockets: () => void;
-  /** 桌面批准当前 pairing */
-  approvePairing: (pairingId: string) => Promise<void>;
-  /** 关闭 server */
-  close: () => Promise<void>;
-}
+export type {
+  CompanionProtocolServerHandle,
+  CompanionProtocolServerOptions,
+} from "./server-types.js";
 
 interface PendingPairingRef { current: PairingSession | null; }
 
@@ -132,6 +85,7 @@ export async function startCompanionProtocolServer(
     clearAuthenticatedSockets: () => clearAuthenticatedSockets(options, authenticatedSockets),
     approvePairing: (pairingId) =>
       approvePendingPairing(options, pendingPairing.current, pairingId, broadcast),
+    getPendingPairingId: () => pendingPairing.current?.pairingId ?? null,
     close: async () => {
       if (closed) {
         return;

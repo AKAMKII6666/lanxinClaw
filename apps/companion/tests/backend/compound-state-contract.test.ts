@@ -185,7 +185,7 @@ describe("compound affair/job/permission state contract", () => {
         executor: "openclaw",
         status: "needs_permission",
         goal: "等待授权",
-        allowedPermissions: ["workspace.read"],
+        allowedPermissions: ["secrets.read"],
         permissionRequestId: "perm_perm_cancel",
         progressSummary: "",
       },
@@ -195,9 +195,9 @@ describe("compound affair/job/permission state contract", () => {
       jobId: "job_perm_cancel",
       affairId: "affair_perm_cancel",
       requester: "zhang-boss",
-      requestedPermissions: ["workspace.read"],
+      requestedPermissions: ["secrets.read"],
       reason: "等待授权",
-      risk: "low",
+      risk: "high",
       proposedScope: {},
       denyConsequence: "拒绝授权会让该 job 失败，但不等于删除整件事务。",
       requestedAt: new Date().toISOString(),
@@ -233,7 +233,7 @@ describe("compound affair/job/permission state contract", () => {
       assert.equal(allowed.error.code, "permission_expired");
     }
     assert.equal(sideEffects, 0);
-    assert.equal(gate.hasGrant("job_perm_cancel", "workspace.read"), false);
+    assert.equal(gate.hasGrant("job_perm_cancel", "secrets.read"), false);
   });
 
   it("affair.cancel 对 needs_permission 是复合动作：先取消 job 并失效权限，再关闭事务", async () => {

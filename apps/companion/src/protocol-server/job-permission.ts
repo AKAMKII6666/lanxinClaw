@@ -13,6 +13,7 @@ import {
   type PermissionId,
   type ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
+import { enrichPermissionsForWebResearch } from "../gateway-runtime/openclaw-capability.js";
 import type { CompanionProtocolServerOptions } from "./server.js";
 
 const KNOWN_PERMISSION_ID_SET = new Set<string>(PERMISSION_IDS);
@@ -31,7 +32,8 @@ export function enqueueJobPermission(
   if (!validated.ok) {
     return validated;
   }
-  const request = buildRequest(payload, validated.permissions);
+  const permissions = enrichPermissionsForWebResearch(validated.permissions, payload.goal);
+  const request = buildRequest(payload, permissions);
   const enqueued = options.backend.getPermissionGate().enqueue(request);
   if (enqueued.ok) {
     return { ok: true, permissionRequestId: request.permissionRequestId, request };

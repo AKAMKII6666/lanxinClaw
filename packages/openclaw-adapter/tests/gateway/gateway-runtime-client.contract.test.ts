@@ -36,8 +36,12 @@ describe("gateway runtime client contract", () => {
       allowedPermissions: ["workspace.read"],
     });
     assert.equal(created.ok, true);
-    assert.equal(fake.createdRequests[0]?.sessionKey, "lanxing-job:job_gateway_001");
+    assert.equal(fake.createdRequests[0]?.sessionKey, "agent:main:lanxing-job:job_gateway_001");
+    assert.equal(fake.createdRequests[0]?.idempotencyKey, "lanxing-job:job_gateway_001");
     assert.deepEqual(fake.createdRequests[0]?.scopes, ["workspace.read"]);
+    if (created.ok) {
+      assert.equal(created.job.openclawSessionKey, "agent:main:lanxing-job:job_gateway_001");
+    }
 
     if (!created.ok) {
       return;

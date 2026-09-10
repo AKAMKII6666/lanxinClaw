@@ -4,7 +4,12 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { validatePermissions } from "../../src/protocol-server/job-permission.js";
+import { createEnvelope } from "@lanxin-claw/protocol";
+import { createCompanionBackendRuntime } from "../../src/backend/runtime.js";
+import {
+  enqueueJobPermission,
+  validatePermissions,
+} from "../../src/protocol-server/job-permission.js";
 
 describe("validatePermissions", () => {
   it("rejects unknown permission ids without silent strip", () => {
@@ -29,5 +34,37 @@ describe("validatePermissions", () => {
     if (ok.ok) {
       assert.deepEqual(ok.permissions, ["workspace.read", "network.access"]);
     }
+  });
+});
+
+describe("enqueueJobPermission research enrich", () => {
+  it("查价 goal 仅 network.access 时 permission 请求含 desktop.control", () => {
+    const backend = createCompanionBackendRuntime();
+    const envelope = createEnvelope({
+      source: { kind: "phone", deviceId: "phone_1" },
+      target: { kind: "companion", deviceId: "desk_1" },
+      type: "job.create",
+      payload: {
+        jobId: "job_price_1",
+        affairId: "affair_price_1",
+        executor: "openclaw",
+        status: "queued",
+        goal: "查询BNB当前价格",
+        workspaceHint: null,
+        allowedPermissions: ["network.access"],
+        progressSummary: "",
+        blockedReason: null,
+        resumeCondition: null,
+        permissionRequestId: null,
+      },
+    });
+    const queued = enqueueJobPermission({ backend } as never, envelope);
+    assert.equal(queued.ok, true);
+    if (!queued.ok) {
+      return;
+    }
+    assert.ok(queued.request.requestedPermissions.includes("desktop.control"));
+    assert.ok(queued.request.requestedPermissions.includes("network.access"));
+    assert.equal(queued.request.risk, "high");
   });
 });

@@ -19,8 +19,8 @@ export function toOnboardingServiceConfig(config: OnboardingSubmitPayload): Onbo
     apiKey: config.apiKey,
     endpoint: config.endpoint ?? null,
     modelRef: config.modelRef,
-    enableWebSearch: config.enableWebSearch === true,
-    enableBrowser: config.enableBrowser === true,
+    enableWebSearch: false,
+    enableBrowser: true,
     webSearchApiKey: config.webSearchApiKey ?? "",
   };
 }

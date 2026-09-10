@@ -138,7 +138,7 @@ describe("companion protocol server", () => {
     }
   });
 
-  it("job.create 广播 permission.request；旁听 socket 收不到业务流", { timeout: 8000 }, async () => {
+  it("job.create 向已认证 phone 推 needs_permission；旁听收不到业务流", { timeout: 8000 }, async () => {
     const { server, socket, identityStore, backend } = await startHarness();
     const reader = createJsonReader(socket);
     const eavesdrop = new WebSocket(server.wsUrl);
@@ -182,19 +182,16 @@ describe("companion protocol server", () => {
           allowedPermissions: ["workspace.read"],
         },
       })));
-      const needsPerm = await reader.nextEnvelope("job.needs_permission");
-      assert.equal(needsPerm.type, "job.needs_permission");
-      assert.equal(needsPerm.source.kind, "companion");
-      assert.equal(needsPerm.target.kind, "phone");
-      const permReq = await reader.nextEnvelope("permission.request");
-      assert.equal(permReq.type, "permission.request");
-      assert.equal(permReq.source.kind, "companion");
-      assert.equal(permReq.target.kind, "phone");
+      const affairAck = await reader.next("affair.create ack");
+      assert.equal(affairAck.ok, true);
+      assert.equal(affairAck.acceptedType, "affair.create");
+      await reader.nextEnvelope("job.needs_permission");
+      await reader.nextEnvelope("permission.request");
       const createAck = await reader.next("job.create ack");
       assert.equal(createAck.ok, true);
       assert.equal(createAck.acceptedType, "job.create");
-      await new Promise((resolve) => setTimeout(resolve, 80));
       assert.equal(backend.listPendingPermissionCards().length, 1);
+      assert.equal(backend.getPermissionGate().hasPendingForJob("job_perm_001"), true);
       const leaked: Array<{ type?: string }> = [];
       while (spy.queuedLength() > 0) {
         leaked.push(await spy.next("eavesdrop leftover"));
@@ -517,8 +514,9 @@ describe("companion protocol server", () => {
         },
       })));
       await waitFor(() => backend.getSnapshot().currentAffair?.affairId === "affair_srv_001");
+      await new Promise((resolve) => setTimeout(resolve, 80));
       assert.equal(backend.listPendingPermissionCards().length, 1);
-      assert.equal(backend.getState().jobs.get("job_srv_001")?.status, "needs_permission");
+      assert.equal(backend.getPermissionGate().hasPendingForJob("job_srv_001"), true);
       assert.equal(backend.getState().chatMessages.length, 1);
       socket.send(JSON.stringify(createEnvelope({
         source: { kind: "phone", deviceId: "phone_srv_001" },

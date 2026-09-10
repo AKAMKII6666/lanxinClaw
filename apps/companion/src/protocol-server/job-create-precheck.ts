@@ -101,9 +101,9 @@ function precheckOpenClawCapability(
     ok: false,
     code: "capability_missing",
     message:
-      "OpenClaw 网页/浏览器能力未配置或未就绪，无法创建联网执行 job。请在 companion onboarding 勾选网页能力并配置搜索 key。",
+      "OpenClaw 浏览器能力未就绪，无法创建联网/浏览器执行 job。请确认 companion 已启动自托管 Gateway（安装档默认开启 browser）。",
     retryable: false,
-    nextStep: "configure_openclaw_web_tools",
+    nextStep: "configure_openclaw_browser",
   };
 }
 

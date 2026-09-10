@@ -22,14 +22,17 @@ export function sameGatewayRuntimeInput(
   if (!left) {
     return false;
   }
-  return (
-    left.provider === right.provider &&
-    (left.endpoint ?? null) === (right.endpoint ?? null) &&
-    left.modelRef === right.modelRef &&
-    left.workspace === right.workspace &&
-    Boolean(left.enableWebSearch) === Boolean(right.enableWebSearch) &&
-    Boolean(left.enableBrowser) === Boolean(right.enableBrowser) &&
-    left.apiKey === right.apiKey &&
-    (left.webSearchApiKey ?? "") === (right.webSearchApiKey ?? "")
-  );
+  const pairs: Array<[string | boolean | null | undefined, string | boolean | null | undefined]> = [
+    [left.provider, right.provider],
+    [left.endpoint ?? null, right.endpoint ?? null],
+    [left.modelRef, right.modelRef],
+    [left.workspace, right.workspace],
+    [Boolean(left.enableWebSearch), Boolean(right.enableWebSearch)],
+    [Boolean(left.enableBrowser), Boolean(right.enableBrowser)],
+    [left.apiKey, right.apiKey],
+    [left.webSearchApiKey ?? "", right.webSearchApiKey ?? ""],
+    [Boolean(left.browserProxyEnabled), Boolean(right.browserProxyEnabled)],
+    [left.browserProxyUrl ?? "", right.browserProxyUrl ?? ""],
+  ];
+  return pairs.every(([a, b]) => a === b);
 }

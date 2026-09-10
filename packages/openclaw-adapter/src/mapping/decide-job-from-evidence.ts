@@ -19,9 +19,7 @@ import {
   classifyBusinessEvidence,
   classifyTask,
   containsBlockingText,
-  failedFindingKind,
   firstBlockingFinding,
-  firstFailedFinding,
   hasCancelledFinding,
   hasNegativeFinalReply,
   hasTerminalLifecycle,
@@ -45,6 +43,10 @@ import {
   isTerminalWithoutBusinessResult,
 } from "./decision/completion-gate.js";
 import { buildSuperviseProjection } from "./decision/supervise-projection.js";
+import {
+  evaluateFailedFindingRule,
+  evaluateSoftWebSearchTerminalRule,
+} from "./decision/web-research-rules.js";
 
 /** Lanxin 终态门闩。 */
 const TERMINAL_JOB_STATUSES = new Set<JobStatus>(["completed", "failed", "canceled"]);
@@ -93,6 +95,7 @@ const DECISION_RULES: readonly DecisionRule[] = [
   waitingApprovalRule,
   negativeFinalReplyRule,
   failedFindingRule,
+  softWebSearchTerminalRule,
   taskBlockedRule,
   taskFailedRule,
   runFailedRule,
@@ -238,22 +241,15 @@ function negativeFinalReplyRule(context: DecisionContext): OpenClawToLanxinJobDe
 }
 
 function failedFindingRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
-  const finding = firstFailedFinding(context.evidence);
-  if (!finding) {
-    return null;
-  }
-  const reason = safeText(
-    finding.summary ?? finding.errorCode ?? summaryFromEvidence(context.evidence, "OpenClaw 工具执行失败"),
-  );
-  return decide(context, "failed", {
-    kind: failedFindingKind(finding),
-    strength: "strong",
-    reasonCode: finding.status === "timed_out" ? "openclaw.tool_timed_out" : "openclaw.tool_failed",
-    summary: reason,
-    blockedReason: reason,
-    resumeCondition: null,
-    rawRunStatus: context.rawRunStatus,
-  });
+  return evaluateFailedFindingRule(context, (status, input) => decide(context, status, input)) as
+    | OpenClawToLanxinJobDecision
+    | null;
+}
+
+function softWebSearchTerminalRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
+  return evaluateSoftWebSearchTerminalRule(context, (status, input) =>
+    decide(context, status, input),
+  ) as OpenClawToLanxinJobDecision | null;
 }
 
 function taskBlockedRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {

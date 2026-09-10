@@ -104,6 +104,9 @@ function applyValidatedEnvelope(
     state.connection.pairingId = payload.pairingId;
     state.connection.phoneDeviceId = payload.phoneDeviceId;
     state.connection.phoneDisplayName = payload.phoneDisplayName;
+    // 新配对请求覆盖旧会话投影，否则 pendingPairingFromSnapshot 因残留 sessionId 永远为 null
+    state.connection.sessionId = null;
+    state.connection.sessionAuthenticated = false;
     state.connection.lastSeenAt = now;
     return { ok: true, envelope };
   }

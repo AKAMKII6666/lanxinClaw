@@ -12,6 +12,7 @@ import type { AdapterJobStore } from "./job-store.js";
 import type { AdapterJobResult } from "./job-types.js";
 import { validateRunSnapshotIdentity } from "../evidence/snapshot-identity.js";
 import { runtimeErrorResult } from "../client/runtime-error-result.js";
+import { canonicalizeGatewaySessionKey, toGatewaySessionKey } from "../client/gateway/session-key.js";
 
 /**
  * 读取 adapter job；默认刷新 runtime 状态。
@@ -44,10 +45,13 @@ export async function readAdapterJob(
   }
 
   try {
+    const sessionKey =
+      canonicalizeGatewaySessionKey(existing.openclawSessionKey, "main", existing.jobId) ??
+      toGatewaySessionKey(existing.jobId);
     const snapshot = await runtime.getRun(existing.openclawRunId, {
       jobId: existing.jobId,
       affairId: existing.affairId,
-      sessionKey: existing.openclawSessionKey ?? `lanxing-job:${existing.jobId}`,
+      sessionKey,
     });
     const identity = validateRunSnapshotIdentity(existing, snapshot);
     if (!identity.ok) {

@@ -29,6 +29,10 @@ export async function runShellBridgeAction(
     approvePairing: ((pairingId: string) => Promise<void>) | null;
     openLogDir: () => void;
     relaunchCompanion?: () => void;
+    setBrowserProxy?: (
+      enabled: boolean,
+      url: string,
+    ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
     logger: Logger;
   },
   action: BridgeUiAction,
@@ -41,12 +45,25 @@ export async function runShellBridgeAction(
     input.relaunchCompanion?.();
     return;
   }
+  if (action.type === "settings.setBrowserProxy") {
+    if (!input.setBrowserProxy) {
+      markBridgeResultFailed(result, "browser_proxy_unavailable", "当前壳未接入浏览器代理设置", false);
+      return;
+    }
+    const applied = await input.setBrowserProxy(action.enabled, action.url);
+    if (!applied.ok) {
+      markBridgeResultFailed(result, applied.code, applied.message, false);
+      return;
+    }
+    return;
+  }
   const outbound = {
     getParty: () => {
       const phoneDeviceId = input.backend.getState().connection.phoneDeviceId;
       return phoneDeviceId ? { desktopDeviceId: input.desktopDeviceId, phoneDeviceId } : null;
     },
     isSessionAuthenticated: () => input.backend.getState().connection.sessionAuthenticated,
+    // 通话真源在电话侧；companion 不再用本字段拦截 active_call 出站
     hasActiveCall: () => false,
     getAffair: (affairId: string) => input.backend.getState().affairs.get(affairId),
     broadcast: input.broadcast,

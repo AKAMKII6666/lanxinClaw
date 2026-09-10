@@ -130,4 +130,23 @@ describe("dispatchBridgeProtocolAction", () => {
     assert.ok(deliveries[0]?.deliveredAt);
     assert.equal(deps.pendingContext.list().length, 0);
   });
+
+  it("chat.attachContext(active_call) 有 session 时即使 hasActiveCall=false 也直发", () => {
+    const { deps, sent } = createDeps(baseAffair({ status: "running" }), true);
+    const result = dispatchBridgeProtocolAction(
+      {
+        type: "chat.attachContext",
+        text: "F:/workspace/demo.ts",
+        target: "active_call",
+        contentKind: "path",
+      },
+      deps,
+    );
+
+    assert.equal(result.error, null);
+    assert.equal(result.delivery?.status, "sent_to_phone");
+    assert.equal(sent[0]?.type, "chat.context_attach");
+    assert.equal((sent[0]?.payload as { target?: string }).target, "active_call");
+    assert.equal(deps.pendingContext.list().length, 0);
+  });
 });

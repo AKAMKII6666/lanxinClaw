@@ -11,6 +11,7 @@ import type { GatePermissionRequest } from "../types.js";
 
 /**
  * 构造带演示待确认项的 PermissionGate。
+ * 使用 workspace.read 演示待确认主路径。
  *
  * @returns 已入队示例请求的 gate
  */
@@ -21,8 +22,8 @@ export function createDemoPermissionGate(): PermissionGate {
     jobId: "job_fix_code_001",
     affairId: "affair_fix_code_001",
     requester: "zhang-boss",
-    requestedPermissions: ["workspace.write"],
-    reason: "当前 job 需要修复测试失败并写入项目文件",
+    requestedPermissions: ["workspace.read"],
+    reason: "当前 job 需要读取工作区文件（演示待确认）",
     risk: "medium",
     proposedScope: { workspaceRoot: "F:/workspace/xxx" },
     denyConsequence: "拒绝授权会让该 job 失败，但不等于删除整件事务。",

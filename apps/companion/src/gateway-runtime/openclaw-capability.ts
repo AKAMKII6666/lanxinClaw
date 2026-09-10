@@ -6,6 +6,8 @@
  * 纯函数：入参为已解析对象或 JSON 文本，无 I/O。
  */
 
+import type { PermissionId } from "@lanxin-claw/protocol";
+
 /** 单项能力 */
 export interface OpenClawToolCapabilityItem {
   /** 配置是否显式或默认可启用 */
@@ -76,7 +78,7 @@ export function summarizeOpenClawToolCapabilities(
         ? `enabled${provider ? `; provider=${provider}` : ""}${hasKeyClue ? "; key_clue=yes" : ""}`
         : searchEnabled
           ? "enabled but missing provider/key clue"
-          : "not configured (default off until onboarding opt-in)",
+          : "not configured (product does not use web_search)",
     },
     webFetch: {
       enabled: fetchEnabled,
@@ -90,7 +92,7 @@ export function summarizeOpenClawToolCapabilities(
         ? browserEnabledFlag
           ? "browser.enabled"
           : "allowlisted via tools.allow/alsoAllow"
-        : "not configured (default off until onboarding opt-in)",
+        : "not configured (product default should enable browser)",
     },
   };
 }
@@ -131,16 +133,65 @@ export function classifyJobWebCapabilityNeed(input: {
   const wantsSearch =
     /搜索|搜一下|查.{0,8}(价格|新闻|网页|资料)|web_search|google|bing/.test(goal) ||
     /search|news|price/.test(lower);
-  if (wantsBrowser) {
+  // 产品不走 web_search：搜索/联网意图一律按 browser（或 network→browser 就绪）验收。
+  if (wantsBrowser || wantsSearch) {
     return "browser";
-  }
-  if (wantsSearch) {
-    return "web_search";
   }
   if (hasNetwork || /https?:\/\//i.test(goal) || /联网|网页/.test(goal)) {
     return "network";
   }
   return null;
+}
+
+/**
+ * 查资料类意图是否需要浏览器主路径权限。
+ *
+ * @param input goal 与已声明权限
+ * @returns 需要则 true
+ */
+export function needsBrowserResearchPermissions(input: {
+  goal?: string | null;
+  allowedPermissions?: readonly string[] | null;
+}): boolean {
+  return classifyJobWebCapabilityNeed(input) != null;
+}
+
+/**
+ * 为查资料意图并入 desktop.control + network.access（弹权前可见补全，非静默授权）。
+ *
+ * @param permissions 已校验权限
+ * @param goal job 目标
+ * @returns 补全后的权限列表（去重保序）
+ */
+export function enrichPermissionsForWebResearch(
+  permissions: readonly PermissionId[],
+  goal: string | null | undefined,
+): PermissionId[] {
+  if (!needsBrowserResearchPermissions({ goal, allowedPermissions: permissions })) {
+    return [...permissions];
+  }
+  const out: PermissionId[] = [];
+  const seen = new Set<string>();
+  for (const id of ["desktop.control", "network.access", ...permissions] as PermissionId[]) {
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    out.push(id);
+  }
+  // 保持调用方原有权限在前的观感：先补 desktop/network，再追加其余
+  const preferred: PermissionId[] = [];
+  for (const id of ["desktop.control", "network.access"] as const) {
+    if (out.includes(id)) {
+      preferred.push(id);
+    }
+  }
+  for (const id of out) {
+    if (id !== "desktop.control" && id !== "network.access") {
+      preferred.push(id);
+    }
+  }
+  return preferred;
 }
 
 /**
@@ -155,13 +206,13 @@ export function openClawCapabilitySatisfies(
   need: "web_search" | "browser" | "network",
 ): boolean {
   if (need === "browser") {
-    // 浏览器自动化不得用 web_search/fetch 顶替；否则未勾选 browser 仍会假绿过预检。
     return summary.browser.ready;
   }
   if (need === "web_search") {
-    return summary.webSearch.ready;
+    // 兼容旧枚举：产品以 browser 满足，不再要求 web_search 配置。
+    return summary.browser.ready || summary.webSearch.ready;
   }
-  return summary.webSearch.ready || summary.browser.ready || summary.webFetch.ready;
+  return summary.browser.ready || summary.webFetch.ready || summary.webSearch.ready;
 }
 
 function hasWebSearchKeyClue(root: Record<string, unknown>, search: Record<string, unknown>): boolean {

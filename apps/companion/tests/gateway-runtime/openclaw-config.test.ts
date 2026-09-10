@@ -89,7 +89,7 @@ test("生成配置：可选 web/browser tools，不含密钥明文", () => {
   assert.ok(!text.toLowerCase().includes("brave_api_key=secret"));
 });
 
-test("未勾选网页能力时不写 tools/browser", () => {
+test("默认写入 browser；未显式开 web_search", () => {
   const text = generateOpenClawConfig({
     token: "local-token",
     port: 19387,
@@ -99,9 +99,87 @@ test("未勾选网页能力时不写 tools/browser", () => {
     workspace: "C:/ws",
     logFile: "C:/logs/openclaw.log",
   });
-  const config = JSON.parse(text) as { tools?: unknown; browser?: unknown };
-  assert.equal(config.tools, undefined);
-  assert.equal(config.browser, undefined);
+  const config = JSON.parse(text) as {
+    tools?: { alsoAllow?: string[]; web?: unknown };
+    browser?: { enabled?: boolean; headless?: boolean; extraArgs?: string[] };
+  };
+  assert.equal(config.browser?.enabled, true);
+  assert.equal(config.browser?.headless, false);
+  assert.equal(config.browser?.extraArgs, undefined);
+  assert.equal(
+    (config.browser as { ssrfPolicy?: unknown } | undefined)?.ssrfPolicy,
+    undefined,
+  );
+  assert.ok(config.tools?.alsoAllow?.includes("browser"));
+  assert.equal(config.tools?.web, undefined);
+});
+
+test("开启浏览器本地代理时写入 browser 私网 SSRF + fetch fake-IP 合法字段；关闭不残留", () => {
+  const onText = generateOpenClawConfig({
+    token: "local-token",
+    port: 19387,
+    modelRef: "openai/gpt-5.5",
+    providerId: "openai",
+    withApiKey: true,
+    workspace: "C:/ws",
+    logFile: "C:/logs/openclaw.log",
+    webTools: {
+      enableWebSearch: false,
+      enableBrowser: true,
+      browserProxyEnabled: true,
+      browserProxyUrl: "http://127.0.0.1:7890",
+    },
+  });
+  const onConfig = JSON.parse(onText) as {
+    browser?: {
+      extraArgs?: string[];
+      ssrfPolicy?: { dangerouslyAllowPrivateNetwork?: boolean };
+    };
+    tools?: {
+      web?: {
+        fetch?: {
+          useTrustedEnvProxy?: boolean;
+          ssrfPolicy?: {
+            allowRfc2544BenchmarkRange?: boolean;
+            allowIpv6UniqueLocalRange?: boolean;
+            dangerouslyAllowPrivateNetwork?: boolean;
+          };
+        };
+      };
+    };
+  };
+  assert.deepEqual(onConfig.browser?.extraArgs, ["--proxy-server=http://127.0.0.1:7890"]);
+  assert.equal(onConfig.browser?.ssrfPolicy?.dangerouslyAllowPrivateNetwork, true);
+  assert.equal(onConfig.tools?.web?.fetch?.useTrustedEnvProxy, true);
+  assert.equal(onConfig.tools?.web?.fetch?.ssrfPolicy?.allowRfc2544BenchmarkRange, true);
+  assert.equal(onConfig.tools?.web?.fetch?.ssrfPolicy?.allowIpv6UniqueLocalRange, true);
+  assert.equal(onConfig.tools?.web?.fetch?.ssrfPolicy?.dangerouslyAllowPrivateNetwork, undefined);
+
+  const offText = generateOpenClawConfig({
+    token: "local-token",
+    port: 19387,
+    modelRef: "openai/gpt-5.5",
+    providerId: "openai",
+    withApiKey: true,
+    workspace: "C:/ws",
+    logFile: "C:/logs/openclaw.log",
+    webTools: {
+      enableWebSearch: false,
+      enableBrowser: true,
+      browserProxyEnabled: false,
+      browserProxyUrl: "http://127.0.0.1:7890",
+    },
+  });
+  const offConfig = JSON.parse(offText) as {
+    browser?: {
+      extraArgs?: string[];
+      ssrfPolicy?: { dangerouslyAllowPrivateNetwork?: boolean };
+    };
+    tools?: { web?: unknown };
+  };
+  assert.equal(offConfig.browser?.extraArgs, undefined);
+  assert.equal(offConfig.browser?.ssrfPolicy, undefined);
+  assert.equal(offConfig.tools?.web, undefined);
 });
 
 test("providerMeta 映射 provider → providerId/needsKey/baseUrl", () => {

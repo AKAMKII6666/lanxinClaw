@@ -155,12 +155,26 @@ test("createRun 同步返回失败状态时广播 job.failed 而非 job.accepted
 test("allow_once 在 createRun 成功后消耗 grant", async () => {
   const { gate, broadcasts, jobStatuses, delegator } = createHarness();
   jobStatuses.set("job_test_once", "needs_permission");
-  enqueueAndDecide(gate, "pr_test_once", "job_test_once", "allow_once");
-  assert.equal(gate.hasGrant("job_test_once", "workspace.read"), true);
+  // secrets.read 用 allow_once 验证消耗语义。
+  gate.enqueue({
+    permissionRequestId: "pr_test_once",
+    jobId: "job_test_once",
+    affairId: "affair_test_001",
+    requester: "zhang-boss",
+    requestedPermissions: ["secrets.read"],
+    reason: "test goal",
+    risk: "high",
+    proposedScope: { workspaceRoot: "F:/ws" },
+    denyConsequence: "停住",
+    requestedAt: new Date().toISOString(),
+    expiresAt: null,
+  });
+  gate.decide("pr_test_once", "allow_once");
+  assert.equal(gate.hasGrant("job_test_once", "secrets.read"), true);
   await delegator.handlePermissionGranted("pr_test_once");
 
   assert.equal(broadcasts.filter((e) => e.type === "job.accepted").length, 1);
-  assert.equal(gate.isGranted("job_test_once", "workspace.read"), false);
+  assert.equal(gate.isGranted("job_test_once", "secrets.read"), false);
   delegator.stop();
 });
 
@@ -196,9 +210,9 @@ test("allow_once 在 createRun 失败时不消耗 grant", async () => {
     jobId: "job_once_fail",
     affairId: "affair_test_001",
     requester: "zhang-boss",
-    requestedPermissions: ["workspace.read"],
+    requestedPermissions: ["secrets.read"],
     reason: "test goal",
-    risk: "low",
+    risk: "high",
     proposedScope: { workspaceRoot: "F:/ws" },
     denyConsequence: "停住",
     requestedAt: new Date().toISOString(),
@@ -212,7 +226,7 @@ test("allow_once 在 createRun 失败时不消耗 grant", async () => {
   const failedPayload = failed.payload as { goal?: string; statusReasonCode?: string };
   assert.equal(failedPayload.goal, "test goal");
   assert.equal(failedPayload.statusReasonCode, "runtime_create_failed");
-  assert.equal(gate.hasGrant("job_once_fail", "workspace.read"), true);
+  assert.equal(gate.hasGrant("job_once_fail", "secrets.read"), true);
   delegator.stop();
 });
 

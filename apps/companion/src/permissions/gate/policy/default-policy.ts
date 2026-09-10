@@ -1,16 +1,33 @@
 /**
- * 权限默认策略（对照安全模型）。
+ * 权限默认策略。
  *
  * 职责：把 permission id 分到 default_allow / needs_confirm / default_deny。
  * 不拥有：用户确认 UI、实际授予落库、OpenClaw。
  * 纯函数：无 I/O。
+ *
+ * 说明：OpenClaw 侧工具（browser 等）默认开启与本策略独立；
+ * 任务发放仍走 needs_confirm，须用户在 companion 授权后才委派。
  */
 
 import { PERMISSION_IDS, type PermissionId } from "@lanxin-claw/protocol";
 import type { PermissionPolicyBucket } from "../types.js";
 
-/** 未授权时默认拒绝的高风险权限 */
-const DEFAULT_DENY = new Set<PermissionId>(["secrets.read", "desktop.control"]);
+/**
+ * 产品常开执行能力清单（对应 OpenClaw 默认可执行面）。
+ * 清单本身不表示 gate 静默放行；classify 仍为 needs_confirm。
+ */
+export const PRODUCT_BASELINE_PERMISSIONS = [
+  "workspace.read",
+  "workspace.write",
+  "command.run",
+  "network.access",
+  "git.read",
+  "git.write",
+  "desktop.control",
+] as const satisfies readonly PermissionId[];
+
+/** 未授权时默认拒绝（不得静默放行） */
+const DEFAULT_DENY = new Set<PermissionId>(["secrets.read"]);
 
 /** 元能力：查看连接/能力摘要；不在执行 permission id 表内时视为允许 */
 const META_ALLOW_LABELS = new Set(["connection.status", "companion.capability_summary"]);

@@ -26,6 +26,13 @@ export { createFileAdapterJobStore } from "./jobs/file-job-store.js";
 export { createAdapterJob } from "./jobs/create-job.js";
 export { readAdapterJob } from "./jobs/read-job.js";
 export { cancelAdapterJob } from "./jobs/cancel-job.js";
+export {
+  DEFAULT_GATEWAY_AGENT_ID,
+  toGatewaySessionKey,
+  canonicalizeGatewaySessionKey,
+  sessionKeysEquivalent,
+  toJobIdempotencyKey,
+} from "./client/gateway/session-key.js";
 
 export type {
   OpenClawRuntimeClient,

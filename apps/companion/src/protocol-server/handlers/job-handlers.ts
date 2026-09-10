@@ -23,7 +23,8 @@ import type { HandleProtocolSocketMessageInput } from "../router.js";
 import { resolveOutboundParty, sendJson } from "../router-utils.js";
 
 /**
- * 处理 job.create：预检、入队 permission、apply 成功才 ack。
+ * 处理 job.create：预检、入队 permission、apply 成功才 ack；
+ * 出站 needs_permission / permission.request，等待用户授权后再委派。
  *
  * @param input 入参
  * @param parsed job.create envelope
@@ -32,9 +33,10 @@ export async function handleJobCreate(
   input: HandleProtocolSocketMessageInput,
   parsed: ProtocolEnvelope,
 ): Promise<void> {
-  const precheck = precheckJobCreate(input.options.backend, parsed, {
-    getOpenClawToolCapabilities: input.options.getOpenClawToolCapabilities,
-  });
+  const capabilityPort = input.options.getOpenClawToolCapabilities
+    ? { getOpenClawToolCapabilities: input.options.getOpenClawToolCapabilities }
+    : {};
+  const precheck = precheckJobCreate(input.options.backend, parsed, capabilityPort);
   if (!precheck.ok) {
     sendJson(input.socket, { ok: false, error: precheck });
     return;
@@ -62,10 +64,52 @@ export async function handleJobCreate(
     sendJson(input.socket, { ok: false, error: queued });
     return;
   }
+  const prepared = prepareJobCreatePermissionApply(input, parsed, payload, queued.request);
+  if (!prepared.ok) {
+    gate.clearPendingForJob(payload.jobId);
+    releaseJobCreateClaim(payload.jobId);
+    sendJson(input.socket, { ok: false, error: prepared.error });
+    return;
+  }
+
+  if (prepared.phoneDeviceId !== "unknown") {
+    input.sendEnvelope(prepared.needsEnv);
+    input.sendEnvelope(prepared.permEnv);
+  }
+
+  recordJobCreateAccepted(input.options.backend, parsed);
+  releaseJobCreateClaim(payload.jobId);
+  sendJson(input.socket, { ok: true, acceptedType: "job.create" });
+}
+
+/**
+ * 校验并 apply needs/perm；失败时由调用方清 claim。
+ *
+ * @param input 入参
+ * @param parsed 原始 envelope
+ * @param payload job payload
+ * @param queued 已入队权限
+ */
+function prepareJobCreatePermissionApply(
+  input: HandleProtocolSocketMessageInput,
+  parsed: ProtocolEnvelope,
+  payload: JobPayload,
+  request: Parameters<typeof buildPermissionRequestEnvelope>[1],
+):
+  | {
+      ok: true;
+      phoneDeviceId: string;
+      needsEnv: ProtocolEnvelope;
+      permEnv: ProtocolEnvelope;
+    }
+  | {
+      ok: false;
+      error: { code: string; message: string; retryable: boolean };
+    } {
   const jobPayload: JobPayload = {
     ...payload,
     status: "needs_permission",
-    permissionRequestId: queued.permissionRequestId,
+    permissionRequestId: request.permissionRequestId,
     progressSummary: "",
   };
   const party = resolveOutboundParty(input) ?? {
@@ -73,35 +117,20 @@ export async function handleJobCreate(
     phoneDeviceId: input.options.backend.getState().connection.phoneDeviceId ?? "unknown",
   };
   const needsEnv = buildJobNeedsPermissionEnvelope(party, jobPayload, parsed.messageId);
-  const permEnv = buildPermissionRequestEnvelope(party, queued.request, parsed.messageId);
+  const permEnv = buildPermissionRequestEnvelope(party, request, parsed.messageId);
   const outboundValid = validateJobCreateOutbound(needsEnv, permEnv);
   if (!outboundValid.ok) {
-    gate.clearPendingForJob(payload.jobId);
-    releaseJobCreateClaim(payload.jobId);
-    sendJson(input.socket, { ok: false, error: outboundValid.error });
-    return;
+    return { ok: false, error: outboundValid.error };
   }
   const appliedNeeds = input.options.backend.applyProtocolEnvelope(needsEnv);
   if (!appliedNeeds.ok) {
-    gate.clearPendingForJob(payload.jobId);
-    releaseJobCreateClaim(payload.jobId);
-    sendJson(input.socket, { ok: false, error: appliedNeeds });
-    return;
+    return { ok: false, error: appliedNeeds };
   }
   const appliedPerm = input.options.backend.applyProtocolEnvelope(permEnv);
   if (!appliedPerm.ok) {
-    gate.clearPendingForJob(payload.jobId);
-    releaseJobCreateClaim(payload.jobId);
-    sendJson(input.socket, { ok: false, error: appliedPerm });
-    return;
+    return { ok: false, error: appliedPerm };
   }
-  if (party.phoneDeviceId !== "unknown") {
-    input.sendEnvelope(needsEnv);
-    input.sendEnvelope(permEnv);
-  }
-  recordJobCreateAccepted(input.options.backend, parsed);
-  releaseJobCreateClaim(payload.jobId);
-  sendJson(input.socket, { ok: true, acceptedType: "job.create" });
+  return { ok: true, phoneDeviceId: party.phoneDeviceId, needsEnv, permEnv };
 }
 
 function validateJobCreateOutbound(

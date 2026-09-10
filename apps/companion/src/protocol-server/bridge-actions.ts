@@ -174,11 +174,18 @@ function dispatchAttachContext(
   }
   const party = deps.getParty();
   const canSend = deps.isSessionAuthenticated() && party !== null;
-  if (canSend && (deps.hasActiveCall() || action.target === "affair")) {
+  // 通话真源在电话侧：有 session 即直发；phone 非通话时只入队不注入
+  if (canSend) {
     deps.broadcast(buildContextAttachEnvelope(party, built.value));
     return ok(deliveryFor(action, deps, "sent_to_phone", "上下文已发送给电话端", null));
   }
-  const delivery = deliveryFor(action, deps, "queued_until_session", "上下文已排队，等待电话 session 后发送", "session_not_authenticated");
+  const delivery = deliveryFor(
+    action,
+    deps,
+    "queued_until_session",
+    "上下文已排队，等待电话 session 后发送",
+    "session_not_authenticated",
+  );
   const queued = deps.pendingContext.enqueue({
     text: built.value.text,
     contentKind: action.contentKind,

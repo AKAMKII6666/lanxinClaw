@@ -11,7 +11,6 @@ import type { OnboardingSubmitPayload } from "../../../../bridge/contract.js";
 import { QWEN_API_KEY_HELP_URL } from "../../../../onboarding/presets/qwen.js";
 import { GenericProviderFields } from "./generic-provider-fields.js";
 import { QwenConfigFields } from "../qwen/qwen-config-fields.js";
-import { WebToolsFields } from "./web/web-tools-fields.js";
 
 const PROVIDER_OPTIONS = [
   { value: "qwen", label: "千问（阿里云百炼）" },
@@ -44,12 +43,6 @@ export interface ConfigFormFieldsProps {
   onQwenModelChange: (next: string) => void;
   onQwenAdvancedOpenChange: (next: boolean) => void;
   onQwenWorkspaceIdChange: (next: string) => void;
-  enableWebSearch: boolean;
-  enableBrowser: boolean;
-  webSearchApiKey: string;
-  onEnableWebSearchChange: (next: boolean) => void;
-  onEnableBrowserChange: (next: boolean) => void;
-  onWebSearchApiKeyChange: (next: string) => void;
 }
 
 /**
@@ -116,15 +109,6 @@ export function ConfigFormFields(props: ConfigFormFieldsProps): ReactElement {
           }
         />
       ) : null}
-      <WebToolsFields
-        locked={props.locked}
-        enableWebSearch={props.enableWebSearch}
-        enableBrowser={props.enableBrowser}
-        webSearchApiKey={props.webSearchApiKey}
-        onEnableWebSearchChange={props.onEnableWebSearchChange}
-        onEnableBrowserChange={props.onEnableBrowserChange}
-        onWebSearchApiKeyChange={props.onWebSearchApiKeyChange}
-      />
     </Stack>
   );
 }

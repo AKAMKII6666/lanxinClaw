@@ -68,6 +68,13 @@ export interface DiagnosticReportView {
   environment: DiagnosticProbeView[];
   /** 最近错误；无则为 null */
   lastError: DiagnosticLastErrorView | null;
+  /** 托管浏览器本地代理偏好（非密钥） */
+  browserProxy: {
+    /** 是否开启 */
+    enabled: boolean;
+    /** 代理 URL */
+    url: string;
+  };
   /** 供「复制诊断报告」的纯文本；不得含 key 明文 */
   copyText: string;
 }

@@ -106,6 +106,8 @@ describe("protocol server inbound guards", () => {
       await reader.nextEnvelope("job.needs_permission");
       await reader.nextEnvelope("permission.request");
       await reader.next("job.create ack");
+      assert.equal(backend.getState().jobs.get("job_cancel_np")?.status, "needs_permission");
+      assert.equal(backend.listPendingPermissionCards().length, 1);
       socket.send(JSON.stringify(createEnvelope({
         source: { kind: "phone", deviceId: "phone_srv_001" },
         target: { kind: "companion", deviceId: "desktop_srv_001" },

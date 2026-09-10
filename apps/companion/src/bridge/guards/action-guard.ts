@@ -63,6 +63,8 @@ type ActionCandidate = {
   text?: unknown;
   target?: unknown;
   contentKind?: unknown;
+  enabled?: unknown;
+  url?: unknown;
 };
 
 /**
@@ -157,6 +159,20 @@ function isChatAction(typed: ActionCandidate): boolean {
 }
 
 /**
+ * 校验浏览器代理设置。
+ *
+ * @param typed 候选字段
+ * @returns 是否合法
+ */
+function isBrowserProxySettingsAction(typed: ActionCandidate): boolean {
+  return (
+    typed.type === "settings.setBrowserProxy" &&
+    typeof typed.enabled === "boolean" &&
+    typeof typed.url === "string"
+  );
+}
+
+/**
  * 校验带 payload 的复合白名单操作。
  *
  * @param typed 已确认含 type 字符串的候选
@@ -171,7 +187,8 @@ function matchesPayloadAction(typed: ActionCandidate & { type: string }): boolea
     isDeviceAction(typed) ||
     isPermissionDecideAction(typed) ||
     isPairingDecideAction(typed) ||
-    isChatAction(typed)
+    isChatAction(typed) ||
+    isBrowserProxySettingsAction(typed)
   );
 }
 

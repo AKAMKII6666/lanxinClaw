@@ -65,8 +65,8 @@ export function buildQwenSubmitPayload(
         apiKey: input.apiKey.trim(),
         endpoint: resolved.endpoint,
         modelRef: resolved.modelRef,
-        enableWebSearch: input.enableWebSearch === true,
-        enableBrowser: input.enableBrowser === true,
+        enableWebSearch: false,
+        enableBrowser: true,
         ...(input.webSearchApiKey?.trim()
           ? { webSearchApiKey: input.webSearchApiKey.trim() }
           : {}),
@@ -89,8 +89,8 @@ export function buildGenericSubmitPayload(input: GenericSubmitInput): Onboarding
     apiKey: input.apiKey.trim(),
     ...(input.endpoint.trim() ? { endpoint: input.endpoint.trim() } : {}),
     modelRef: input.modelRef.trim(),
-    enableWebSearch: input.enableWebSearch === true,
-    enableBrowser: input.enableBrowser === true,
+    enableWebSearch: false,
+    enableBrowser: true,
     ...(input.webSearchApiKey?.trim()
       ? { webSearchApiKey: input.webSearchApiKey.trim() }
       : {}),

@@ -122,6 +122,12 @@ export interface CompanionBackendRuntime {
   stopSupervision(): void;
   /** 记录入站 messageId（job.create 等 ack 前去重） */
   recordInboundMessageId(messageId: string): void;
+  /**
+   * 追加脱敏审计。
+   *
+   * @param input 审计字段
+   */
+  appendAudit(input: AppendAuditInput): void;
 }
 
 /**
@@ -366,6 +372,10 @@ export function createCompanionBackendRuntime(
       const now = new Date().toISOString();
       state.seenMessages.set(messageId, { messageId, seenAt: now });
       state.updatedAt = now;
+    },
+    appendAudit(input) {
+      auditStore.append(input);
+      publishSnapshot();
     },
   };
 }

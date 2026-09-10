@@ -13,6 +13,7 @@ import Typography from "@mui/material/Typography";
 import { useEffect, useState, type ReactElement } from "react";
 import type { RendererBridgeApi } from "../../bridge/renderer-api.js";
 import { DiagnosticsActions } from "./actions/diagnostics-actions.js";
+import { DiagnosticsBrowserProxyPrefs } from "./diagnostics-browser-proxy-prefs.js";
 import { DIAGNOSTICS_RESTART_COMPANION_ACTION } from "./diagnostics-bridge-actions.js";
 import { OVERALL_STATUS_LABEL } from "./diagnostics-labels.js";
 import type { DiagnosticReportView } from "./diagnostics-models.js";
@@ -83,6 +84,16 @@ export function DiagnosticsPage(props: { bridge: RendererBridgeApi }): ReactElem
           {feedback}
         </Alert>
       ) : null}
+      <DiagnosticsBrowserProxyPrefs
+        bridge={props.bridge}
+        enabled={report?.browserProxy.enabled ?? true}
+        url={report?.browserProxy.url ?? "http://127.0.0.1:7890"}
+        onFeedback={(message) => {
+          setFeedback(message);
+          setErrorText(null);
+        }}
+        onError={(message) => setErrorText(message)}
+      />
       <DiagnosticsProbeList title="服务" probes={report?.services ?? []} />
       <DiagnosticsProbeList title="环境" probes={report?.environment ?? []} />
       <DiagnosticsLastError lastError={report?.lastError ?? null} />

@@ -31,11 +31,15 @@ export function createDemoDiagnosticReport(): DiagnosticReportView {
       code: "job.blocked",
       severity: "error",
       message: "无法访问 npm registry",
-      affairId: "affair_fix_code_001",
-      jobId: "job_fix_code_001",
+      affairId: "affair_form_code_001",
+      jobId: "job_form_code_001",
       retryable: true,
     },
+    browserProxy: {
+      enabled: true,
+      url: "http://127.0.0.1:7890",
+    },
     copyText:
-      "overall=warn; companion=ok; openclaw=ok; credential=synced; lan_discovery=warn; firewall=warn; lastError=job.blocked",
+      "overall=warn; companion=ok; openclaw=ok; credential=synced; lan_discovery=warn; firewall=warn; lastError=job.blocked; browserProxy=on",
   };
 }

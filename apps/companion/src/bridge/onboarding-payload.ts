@@ -77,8 +77,9 @@ function validateOnboardingCoreFields(typed: OnboardingSubmitPayload): string | 
  */
 function pickWebToolsFields(typed: OnboardingSubmitPayload): Partial<OnboardingSubmitPayload> {
   const out: Partial<OnboardingSubmitPayload> = {
-    enableWebSearch: typed.enableWebSearch === true,
-    enableBrowser: typed.enableBrowser === true,
+    // 产品安装档：不启用 web_search；browser 恒开。
+    enableWebSearch: false,
+    enableBrowser: true,
   };
   if (typeof typed.webSearchApiKey === "string" && typed.webSearchApiKey.trim()) {
     out.webSearchApiKey = typed.webSearchApiKey.trim();

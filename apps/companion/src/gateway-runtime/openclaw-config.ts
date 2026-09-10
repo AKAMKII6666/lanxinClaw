@@ -9,19 +9,28 @@
 /** 子进程注入的模型 key 环境变量名 */
 export const OPENCLAW_MODEL_KEY_ENV = "LANXIN_OPENCLAW_API_KEY";
 
-/** 子进程注入的 Brave web search key 环境变量名（不入 openclaw.json 明文） */
+/** 子进程注入的 Brave web search key 环境变量名（不入 openclaw.json 明文；产品默认不启用 web_search） */
 export const OPENCLAW_BRAVE_KEY_ENV = "BRAVE_API_KEY";
 
-/** 可选网页/浏览器工具写入选项（需用户同意） */
+/** 可选网页工具写入选项（产品默认开 browser；web_search 仅显式开启） */
 export interface OpenClawWebToolsConfigInput {
-  /** 启用 tools.web.search（默认 false，避免静默扩大攻击面） */
+  /** 启用 tools.web.search（产品默认 false，不走此路径） */
   enableWebSearch: boolean;
-  /** 启用 browser + tools.alsoAllow browser（默认 false） */
+  /** 启用 browser；产品安装档恒为 true */
   enableBrowser: boolean;
   /** web search provider；缺省 brave */
   webSearchProvider?: string;
   /** 是否声明 search apiKey 走 env ref（不写明文） */
   withWebSearchApiKey?: boolean;
+  /** 托管浏览器走本地代理；默认 false */
+  browserProxyEnabled?: boolean;
+  /**
+   * 本地代理 URL；开启时写入 browser.extraArgs --proxy-server、
+   * browser.ssrfPolicy.dangerouslyAllowPrivateNetwork、
+   * tools.web.fetch.ssrfPolicy（RFC2544/ULA）与 useTrustedEnvProxy；
+   * 子进程 HTTP(S)_PROXY 由 GatewayRuntimeService 同源注入。
+   */
+  browserProxyUrl?: string | null;
 }
 
 /** 生成配置入参 */
@@ -42,8 +51,73 @@ export interface GenerateOpenClawConfigInput {
   workspace: string;
   /** OpenClaw 自身日志文件（JSON lines） */
   logFile: string;
-  /** 可选网页能力；未传则不写 tools/browser（保持默认关闭） */
+  /**
+   * 可选网页能力覆盖。
+   * 未传时仍默认写入 browser（安装即可用）；web_search 仅在显式 enableWebSearch 时写入。
+   */
   webTools?: OpenClawWebToolsConfigInput | null;
+}
+
+/**
+ * 将网页工具与本地代理偏好写入 config.tools / config.browser。
+ *
+ * @param config 正在组装的 openclaw 配置
+ * @param webTools 可选网页工具入参
+ */
+function applyWebToolsAndBrowserProxy(
+  config: Record<string, unknown>,
+  webTools: OpenClawWebToolsConfigInput | null | undefined,
+): void {
+  const enableBrowser = webTools ? webTools.enableBrowser !== false : true;
+  const enableWebSearch = webTools?.enableWebSearch === true;
+  const tools: Record<string, unknown> = {};
+  const alsoAllow: string[] = [];
+  const proxyUrl = webTools?.browserProxyUrl?.trim() ?? "";
+  const browserProxyOn = webTools?.browserProxyEnabled === true && Boolean(proxyUrl);
+
+  if (enableWebSearch) {
+    tools.web = {
+      search: {
+        enabled: true,
+        provider: webTools?.webSearchProvider?.trim() || "brave",
+      },
+    };
+    alsoAllow.push("group:web");
+  }
+
+  if (enableBrowser) {
+    alsoAllow.push("browser");
+    const browser: Record<string, unknown> = {
+      enabled: true,
+      defaultProfile: "openclaw",
+      headless: false,
+    };
+    if (browserProxyOn) {
+      browser.extraArgs = [`--proxy-server=${proxyUrl}`];
+      browser.ssrfPolicy = { dangerouslyAllowPrivateNetwork: true };
+    }
+    config.browser = browser;
+  }
+
+  if (browserProxyOn) {
+    // web.fetch.ssrfPolicy 为 .strict()，仅允许 RFC2544/ULA；写 dangerouslyAllowPrivateNetwork 会拒启动。
+    const web = (tools.web as Record<string, unknown> | undefined) ?? {};
+    web.fetch = {
+      useTrustedEnvProxy: true,
+      ssrfPolicy: {
+        allowRfc2544BenchmarkRange: true,
+        allowIpv6UniqueLocalRange: true,
+      },
+    };
+    tools.web = web;
+  }
+
+  if (alsoAllow.length > 0 || tools.web) {
+    if (alsoAllow.length > 0) {
+      tools.alsoAllow = alsoAllow;
+    }
+    config.tools = tools;
+  }
 }
 
 /**
@@ -87,34 +161,7 @@ export function generateOpenClawConfig(input: GenerateOpenClawConfigInput): stri
       file: input.logFile,
     },
   };
-  const webTools = input.webTools;
-  if (webTools && (webTools.enableWebSearch || webTools.enableBrowser)) {
-    const tools: Record<string, unknown> = {};
-    if (webTools.enableWebSearch) {
-      const search: Record<string, unknown> = {
-        enabled: true,
-        provider: webTools.webSearchProvider?.trim() || "brave",
-      };
-      // API key 仅经进程 env（BRAVE_API_KEY）注入，不入 openclaw.json。
-      tools.web = { search };
-      tools.alsoAllow = Array.isArray(tools.alsoAllow)
-        ? [...(tools.alsoAllow as string[]), "group:web"]
-        : ["group:web"];
-    }
-    if (webTools.enableBrowser) {
-      const also = Array.isArray(tools.alsoAllow) ? [...(tools.alsoAllow as string[])] : [];
-      if (!also.includes("browser")) {
-        also.push("browser");
-      }
-      tools.alsoAllow = also;
-      config.browser = {
-        enabled: true,
-        defaultProfile: "openclaw",
-        headless: true,
-      };
-    }
-    config.tools = tools;
-  }
+  applyWebToolsAndBrowserProxy(config, input.webTools);
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 

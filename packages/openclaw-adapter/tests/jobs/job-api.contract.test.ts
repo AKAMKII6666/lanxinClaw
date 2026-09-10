@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
   GatewayTransportError,
   OpenClawAdapter,
+  createMemoryAdapterJobStore,
   createMutableMockOpenClawRuntimeClient,
   mapOpenClawRunStatusToJobStatus,
   type AdapterJobRecord,
@@ -281,30 +282,6 @@ describe("applyRunSnapshotToJob 遵守 canTransitionJobStatus", () => {
     assert.equal(next.statusReasonCode, "openclaw.blocked_by_tool_or_policy");
   });
 
-  it("web_search disabled/no provider 进入 blocked 而不是 completed", () => {
-    const next = applyRunSnapshotToJob(baseJob("running"), {
-      runId: "run_apply",
-      status: "completed",
-      evidence: {
-        runId: "run_apply",
-        observedAt: "2026-08-30T03:00:45.655Z",
-        wait: { status: "ok", endedAt: "2026-08-30T03:00:45.655Z" },
-        lifecycle: { endedAt: "2026-08-30T03:00:45.655Z", terminalPhase: "end" },
-        toolFindings: [
-          {
-            toolName: "web_search",
-            status: "failed",
-            summary: "web_search failed: web_search is disabled or no provider is available",
-          },
-        ],
-        sourceStatuses: ["ok", "completed"],
-      },
-    });
-    assert.equal(next.status, "blocked");
-    assert.equal(next.statusReasonCode, "openclaw.blocked_by_tool_or_policy");
-    assert.match(next.blockedReason ?? "", /no provider|disabled/);
-  });
-
   it("browser timeout 进入 failed 而不是 completed", () => {
     const next = applyRunSnapshotToJob(baseJob("running"), {
       runId: "run_apply",
@@ -463,6 +440,34 @@ describe("OpenClawAdapter create/read/cancel", () => {
       return;
     }
     assert.equal(again.job.status, "canceled");
+  });
+
+  it("create 写入 canonical openclawSessionKey；legacy store 仍可 cancel", async () => {
+    const { client } = createMutableMockOpenClawRuntimeClient();
+    const created = await new OpenClawAdapter({ runtime: client }).createJob({
+      jobId: "job_canon",
+      affairId: "affair_canon",
+      goal: "readonly",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) {
+      return;
+    }
+    assert.equal(created.job.openclawSessionKey, "agent:main:lanxing-job:job_canon");
+
+    const store = createMemoryAdapterJobStore();
+    store.set({
+      ...created.job,
+      jobId: "job_legacy_sess",
+      openclawSessionKey: "lanxing-job:job_legacy_sess",
+      status: "running",
+    });
+    const canceled = await new OpenClawAdapter({ runtime: client, store }).cancelJob("job_legacy_sess");
+    assert.equal(canceled.ok, true);
+    if (canceled.ok) {
+      assert.equal(canceled.job.status, "canceled");
+    }
   });
 
   it("同 jobId 幂等；冲突 goal 拒绝", async () => {

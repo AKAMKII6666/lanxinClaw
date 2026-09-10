@@ -26,6 +26,10 @@ import { collectSupplementalEvidence } from "./evidence/probes.js";
 import { normalizeRunSnapshot } from "./evidence/snapshot.js";
 import { readString } from "./framing/readers.js";
 import { readCapabilities } from "./session/capabilities.js";
+import {
+  canonicalizeGatewaySessionKey,
+  DEFAULT_GATEWAY_AGENT_ID,
+} from "../session-key.js";
 
 /** Gateway 协议版本 */
 const PROTOCOL_VERSION = 4;
@@ -100,16 +104,27 @@ async function createGatewayRun(
   const connection = await openGatewayConnection(runtime.options, token, runtime.timeoutMs);
   const { ws } = connection;
   try {
-    const payload = await rpc(ws, "agent", createRunParams(request), runtime.timeoutMs);
+    const sessionKey =
+      canonicalizeGatewaySessionKey(
+        request.sessionKey,
+        request.agentId?.trim() || DEFAULT_GATEWAY_AGENT_ID,
+        request.jobId,
+      ) ?? request.sessionKey;
+    const payload = await rpc(
+      ws,
+      "agent",
+      createRunParams({ ...request, sessionKey }),
+      runtime.timeoutMs,
+    );
     const runId = readString(payload, ["runId", "id"]);
     if (!runId) {
       throw new GatewayTransportError("gateway_invalid_run", "agent 响应缺少 runId", false);
     }
-    runtime.runSessionKeys.set(runId, request.sessionKey);
+    runtime.runSessionKeys.set(runId, sessionKey);
     return normalizeRunSnapshot(payload, "createRun", {
-      context: request,
+      context: { ...request, sessionKey },
       capabilities: connection.capabilities,
-      sessionKey: request.sessionKey,
+      sessionKey,
     });
   } finally {
     ws.close();
@@ -126,7 +141,11 @@ async function getGatewayRun(
   const { ws } = connection;
   try {
     const payload = await rpc(ws, "agent.wait", { runId, timeoutMs: runtime.getRunTimeoutMs }, runtime.timeoutMs);
-    const sessionKey = context?.sessionKey ?? runtime.runSessionKeys.get(runId) ?? null;
+    const sessionKey = canonicalizeGatewaySessionKey(
+      context?.sessionKey ?? runtime.runSessionKeys.get(runId) ?? null,
+      DEFAULT_GATEWAY_AGENT_ID,
+      context?.jobId,
+    );
     const probes = await collectSupplementalEvidence(
       ws,
       connection.capabilities,
@@ -153,7 +172,11 @@ async function cancelGatewayRun(
   const connection = await openGatewayConnection(runtime.options, token, runtime.timeoutMs);
   const { ws } = connection;
   try {
-    const sessionKey = context?.sessionKey ?? runtime.runSessionKeys.get(runId) ?? null;
+    const sessionKey = canonicalizeGatewaySessionKey(
+      context?.sessionKey ?? runtime.runSessionKeys.get(runId) ?? null,
+      DEFAULT_GATEWAY_AGENT_ID,
+      context?.jobId,
+    );
     await rpc(ws, "chat.abort", { ...(sessionKey ? { sessionKey } : {}), runId }, runtime.timeoutMs);
     return normalizeRunSnapshot(
       { runId, status: "cancelled", summary: "cancelled_by_adapter" },

@@ -8,6 +8,7 @@
 
 import type { OpenClawRunSnapshot } from "../client/runtime-client.js";
 import type { AdapterJobRecord } from "../jobs/job-types.js";
+import { sessionKeysEquivalent, toGatewaySessionKey } from "../client/gateway/session-key.js";
 
 /** snapshot 归属校验结果。 */
 export type SnapshotIdentityResult =
@@ -41,8 +42,8 @@ export function validateRunSnapshotIdentity(
   if (evidence.affairId && evidence.affairId !== job.affairId) {
     return mismatch("evidence.affairId");
   }
-  const expectedSessionKey = job.openclawSessionKey ?? `lanxing-job:${job.jobId}`;
-  if (evidence.sessionKey && evidence.sessionKey !== expectedSessionKey) {
+  const expectedSessionKey = job.openclawSessionKey ?? toGatewaySessionKey(job.jobId);
+  if (evidence.sessionKey && !sessionKeysEquivalent(expectedSessionKey, evidence.sessionKey, job.jobId)) {
     return mismatch("evidence.sessionKey");
   }
   return { ok: true };

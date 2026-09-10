@@ -20,7 +20,6 @@ import type { ElectronRuntime, StartCompanionShellOptions } from "./electron-run
 import { createSecretsFromSafeStorage } from "./safe-storage-secrets.js";
 import { buildResidentTrayExtraItems, showDesktopNotification } from "./resident-tray-menu.js";
 import { buildGatewayDiagnosticsInput, buildGatewaySnapshotExtras } from "./panel-runtime-extras.js";
-import { toOnboardingServiceConfig } from "./onboarding-config-map.js";
 import { createCompanionBackendRuntime } from "../../backend/runtime.js";
 import { createFileAuditStore } from "../../audit/file-store.js";
 import { FileIdentityPersistence } from "../../credentials/persistence/file-identity-persistence.js";
@@ -39,11 +38,13 @@ import { flushPendingContext } from "../../protocol-server/bridge-actions.js";
 import { runShellBridgeAction } from "./bridge-outbound.js";
 import { createDeviceRevokePairingHandler, createShellJobDelegator, restoreShellInFlightJobs, startShellLanDiscovery } from "./runtime-wiring.js";
 import { createActivePairedPhoneIdsReader, createLanDiscoveryPairingRefresher } from "./pairing-discovery-refresh.js";
-import { parseProtocolListenHost, type ProtocolListenHost } from "../session/listen-host.js";
-import { JsonFilePersistence } from "../../persistence/json-file.js";
 import type { LoginItemSettingsPort } from "../session/autostart.js";
 import { startCompanionProtocolServer } from "../../protocol-server/server.js";
-import { registerBridgeIpc, type OnboardingIpcPort, type WebContentsLike } from "../../bridge/register-ipc.js";
+import { registerBridgeIpc, type WebContentsLike } from "../../bridge/register-ipc.js";
+import { createOnboardingIpcPort } from "./onboarding-ipc-port.js";
+import { createShellPrefsState } from "./shell-prefs-state.js";
+import { createSetBrowserProxyHandler } from "./shell-browser-proxy-wiring.js";
+import { isE2eAutoApproveEnabled, startE2eAutoApprove } from "./e2e-auto-approve.js";
 
 export type { ElectronRuntime, StartCompanionShellOptions } from "./electron-runtime.js";
 
@@ -148,6 +149,11 @@ export async function startCompanionDesktopShell(
           ...(adapterJobStore ? { adapterJobStore } : {}),
         })
       : null);
+  const shellPrefsState = createShellPrefsState({
+    userDataDir,
+    protocolHostOverride: options.protocolServer?.host,
+  });
+  let listenHost = shellPrefsState.getListenHost();
   const onboardingService = new OnboardingService({
     store: onboardingStore,
     logger: logRegistry.getLogger("shell"),
@@ -159,15 +165,18 @@ export async function startCompanionDesktopShell(
       if (!gatewayService) {
         return { ok: false, code: "gateway_runtime_unavailable", message: "未配置 OpenClaw 运行时" };
       }
+      const prefs = shellPrefsState.getPrefs();
       const handle = await gatewayService.ensureStarted({
         provider: stored.provider,
         apiKey: stored.apiKey,
         endpoint: stored.endpoint,
         modelRef: stored.modelRef,
         workspace,
-        enableWebSearch: stored.enableWebSearch === true,
-        enableBrowser: stored.enableBrowser === true,
+        enableWebSearch: false,
+        enableBrowser: true,
         webSearchApiKey: stored.webSearchApiKey ?? "",
+        browserProxyEnabled: prefs.browserProxyEnabled,
+        browserProxyUrl: prefs.browserProxyUrl,
       });
       delegator?.setAdapter(handle.adapter);
       return createGatewayRuntimeReadyProbe({
@@ -176,46 +185,12 @@ export async function startCompanionDesktopShell(
       })();
     },
   });
-  const onboardingIpc: OnboardingIpcPort = {
-    getStatus: () => ({
-      status: onboardingService.getStatus(),
-      lastError: onboardingService.getLastError(),
-    }),
-    submit: async (config, options) => {
-      const probe = await onboardingService.submitConfig(toOnboardingServiceConfig(config), options);
-      return {
-        ok: probe.ok,
-        ...(probe.ok
-          ? {}
-          : { error: { code: probe.code, message: probe.message, retryable: false } }),
-        status: {
-          status: onboardingService.getStatus(),
-          lastError: onboardingService.getLastError(),
-        },
-      };
-    },
-    bootstrapRuntime: async (options) => {
-      const probe = await onboardingService.bootstrapRuntime(options);
-      return {
-        ok: probe.ok,
-        ...(probe.ok
-          ? {}
-          : { error: { code: probe.code, message: probe.message, retryable: true } }),
-        status: {
-          status: onboardingService.getStatus(),
-          lastError: onboardingService.getLastError(),
-        },
-      };
-    },
-    clear: () => {
-      onboardingService.clear();
+  const onboardingIpc = createOnboardingIpcPort({
+    service: onboardingService,
+    stopGateway: () => {
       void gatewayService?.stop();
-      return {
-        status: onboardingService.getStatus(),
-        lastError: onboardingService.getLastError(),
-      };
     },
-  };
+  });
   const permissionGate = new PermissionGate();
   if (userDataDir) {
     const permissionStore = createFilePermissionGateStore(path.join(userDataDir, "permission-grants.json"));
@@ -224,14 +199,6 @@ export async function startCompanionDesktopShell(
       permissionStore.save({ schemaVersion: 1, ...permissionGate.dump() });
     });
   }
-  const shellSettings = userDataDir
-    ? new JsonFilePersistence<{ listenHost: ProtocolListenHost }>(path.join(userDataDir, "shell-settings.json"), {
-        listenHost: parseProtocolListenHost(process.env.LANXIN_PROTOCOL_HOST),
-      })
-    : null;
-  let listenHost = parseProtocolListenHost(
-    options.protocolServer?.host ?? shellSettings?.load().listenHost ?? process.env.LANXIN_PROTOCOL_HOST,
-  );
   const loginPort: LoginItemSettingsPort | null =
     electron.app.getLoginItemSettings && electron.app.setLoginItemSettings
       ? {
@@ -275,6 +242,8 @@ export async function startCompanionDesktopShell(
         recentServerErrorCode: diagnosticsState.recentServerErrorCode,
         gateway: gatewayService,
         secretsAvailable: secrets.isAvailable(),
+        browserProxyEnabled: shellPrefsState.getPrefs().browserProxyEnabled,
+        browserProxyUrl: shellPrefsState.getPrefs().browserProxyUrl,
       }),
     onDesktopNotify: (title, body) => {
       shellLogger.info({ title, body }, "桌面提醒");
@@ -306,6 +275,23 @@ export async function startCompanionDesktopShell(
             electron.app.relaunch?.();
             electron.app.quit();
           },
+          setBrowserProxy: createSetBrowserProxyHandler({
+            getShellPrefs: () => shellPrefsState.getPrefs(),
+            persistShellPrefs: shellPrefsState.persist,
+            getOnboardingConfig: () => onboardingStore.load(),
+            isOnboardingReady: () => onboardingService.getStatus() === "ready",
+            gatewayService,
+            workspace,
+            getDelegator: () => delegator,
+            hasRunningJobs: () => {
+              for (const job of backend.getState().jobs.values()) {
+                if (job.status === "running" || job.status === "queued") {
+                  return true;
+                }
+              }
+              return false;
+            },
+          }),
           logger: shellLogger,
         },
         action,
@@ -360,9 +346,9 @@ export async function startCompanionDesktopShell(
     protocolHandle = await startCompanionProtocolServer({
       ...protocolOptions,
       logger: logRegistry.getLogger("protocol"),
-      getOpenClawToolCapabilities: gatewayService
-        ? () => gatewayService.getOpenClawToolCapabilities()
-        : undefined,
+      ...(gatewayService
+        ? { getOpenClawToolCapabilities: () => gatewayService.getOpenClawToolCapabilities() }
+        : {}),
       onJobCancel: (input) => (delegator ? delegator.cancelJob(input) : Promise.resolve()),
       onSessionAccepted: () => {
         flushPendingContext({
@@ -401,6 +387,24 @@ export async function startCompanionDesktopShell(
         }
       },
     });
+
+    if (isE2eAutoApproveEnabled()) {
+      const stopE2e = startE2eAutoApprove({
+        getSnapshot: () => backend.getSnapshot(),
+        getPendingPairingId: () => protocolHandle?.getPendingPairingId() ?? null,
+        listPendingPermissionCards: () => backend.listPendingPermissionCards(),
+        applyBridgeAction: (action) => backend.applyBridgeAction(action),
+        bootstrapRuntime: () => onboardingIpc.bootstrapRuntime(),
+        logger: shellLogger,
+      });
+      electron.app.on("will-quit", () => {
+        stopE2e();
+      });
+      shellLogger.info(
+        { event: "e2e.auto_approve_armed", protocolPort: protocolHandle.port },
+        "LANXIN_E2E_AUTO_APPROVE 已启用",
+      );
+    }
   }
 
   mainWindow = (await createMainWindow({
@@ -427,8 +431,8 @@ export async function startCompanionDesktopShell(
       loginPort,
       listenHost,
       onListenHostChange: (next) => {
+        shellPrefsState.setListenHost(next);
         listenHost = next;
-        shellSettings?.save({ listenHost: next });
       },
       openLogDir: () => {
         void electron.shell?.openPath(logDir);

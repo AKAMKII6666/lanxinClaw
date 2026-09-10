@@ -29,7 +29,7 @@ const CONFIG: OnboardingConfig = {
   endpoint: null,
   modelRef: "openai/gpt-5.5",
   enableWebSearch: false,
-  enableBrowser: false,
+  enableBrowser: true,
   webSearchApiKey: "",
 };
 

@@ -33,6 +33,10 @@ export interface BuildDiagnosticReportInput {
   openClawBrowserReady?: boolean;
   /** OpenClaw 能力摘要文案；无密钥 */
   openClawCapabilityDetail?: string | null;
+  /** 托管浏览器本地代理是否开启 */
+  browserProxyEnabled?: boolean;
+  /** 托管浏览器本地代理 URL */
+  browserProxyUrl?: string | null;
 }
 
 /**
@@ -92,6 +96,10 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): D
     ));
   }
   const overallStatus = summarizeOverallStatus([...services, ...environment]);
+  const browserProxy = {
+    enabled: input.browserProxyEnabled === true,
+    url: (input.browserProxyUrl?.trim() || "http://127.0.0.1:7890"),
+  };
   return {
     schemaVersion: "0.1",
     reportId: `diag_${Date.now()}`,
@@ -100,7 +108,8 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): D
     services,
     environment,
     lastError: input.lastError ?? null,
-    copyText: `overall=${overallStatus}; protocol=${input.protocolServerReady === false ? "warn" : "ok"}; gateway=${input.gatewayReady ? "ok" : "warn"}; node=${process.version}`,
+    browserProxy,
+    copyText: `overall=${overallStatus}; protocol=${input.protocolServerReady === false ? "warn" : "ok"}; gateway=${input.gatewayReady ? "ok" : "warn"}; node=${process.version}; browserProxy=${browserProxy.enabled ? "on" : "off"}`,
   };
 }
 
@@ -142,25 +151,16 @@ function probe(
  * @returns probes
  */
 function openClawToolProbes(input: BuildDiagnosticReportInput): DiagnosticProbeView[] {
-  const searchDetail = input.openClawWebSearchReady
-    ? input.openClawCapabilityDetail ?? "ready"
-    : "not configured";
+  // 产品主路径只展示电脑执行能力；不暴露 web_search 技术项。
+  const ready = Boolean(input.openClawBrowserReady);
   return [
     probe(
-      "openclaw.web_search",
-      "OpenClaw web_search",
+      "openclaw.computer",
+      "电脑执行能力",
       "environment",
-      input.openClawWebSearchReady ? "ok" : "warn",
-      searchDetail,
-      input.openClawWebSearchReady ? null : "在 onboarding 勾选网页能力并配置搜索 key 后重试",
-    ),
-    probe(
-      "openclaw.browser",
-      "OpenClaw browser",
-      "environment",
-      input.openClawBrowserReady ? "ok" : "warn",
-      input.openClawBrowserReady ? "ready" : "not configured",
-      input.openClawBrowserReady ? null : "在 onboarding 勾选浏览器能力后重试；每次 job 仍需 companion 授权",
+      ready ? "ok" : "warn",
+      ready ? "浏览器与桌面执行已就绪" : "浏览器能力未就绪",
+      ready ? null : "重启 Companion 以加载安装默认 browser；仍异常则查看复制诊断报告",
     ),
   ];
 }

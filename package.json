@@ -21,6 +21,7 @@
     "logs:ls": "node scripts/logs/ls-logs.mjs",
     "logs:tail": "node scripts/logs/tail-log.mjs",
     "e2e:real-companion": "tsx scripts/sim-phone/run-real-companion-loop.ts",
+    "e2e:live-browser": "tsx scripts/sim-phone/run-live-browser-e2e.ts",
     "e2e:v1.3": "npm run e2e:v1.3 -w @lanxin-claw/companion",
     "dev:companion": "npm run dev:shell -w @lanxin-claw/companion",
     "start:companion": "npm run start:shell -w @lanxin-claw/companion",

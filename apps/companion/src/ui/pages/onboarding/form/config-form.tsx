@@ -44,12 +44,6 @@ export interface ConfigFormProps {
   onQwenModelChange: (next: string) => void;
   onQwenAdvancedOpenChange: (next: boolean) => void;
   onQwenWorkspaceIdChange: (next: string) => void;
-  enableWebSearch: boolean;
-  enableBrowser: boolean;
-  webSearchApiKey: string;
-  onEnableWebSearchChange: (next: boolean) => void;
-  onEnableBrowserChange: (next: boolean) => void;
-  onWebSearchApiKeyChange: (next: string) => void;
   onSubmit: () => void;
 }
 
@@ -72,8 +66,8 @@ export function ConfigForm(props: ConfigFormProps): ReactElement {
           </Typography>
           <Typography variant="body2" color="text.secondary" paragraph>
             {isQwen
-              ? "连接阿里云百炼千问，验证通过后才会启动 OpenClaw 运行时。"
-              : "首次使用需要配置模型服务，验证通过后才会启动 OpenClaw 运行时。"}
+              ? "连接阿里云百炼千问，验证通过后才会启动 OpenClaw 运行时。电脑执行能力（磁盘/命令/浏览器/Git）安装后默认可用。"
+              : "首次使用需要配置模型服务，验证通过后才会启动 OpenClaw 运行时。电脑执行能力安装后默认可用。"}
           </Typography>
           <ConfigFormFields
             provider={props.provider}
@@ -95,12 +89,6 @@ export function ConfigForm(props: ConfigFormProps): ReactElement {
             onQwenModelChange={props.onQwenModelChange}
             onQwenAdvancedOpenChange={props.onQwenAdvancedOpenChange}
             onQwenWorkspaceIdChange={props.onQwenWorkspaceIdChange}
-            enableWebSearch={props.enableWebSearch}
-            enableBrowser={props.enableBrowser}
-            webSearchApiKey={props.webSearchApiKey}
-            onEnableWebSearchChange={props.onEnableWebSearchChange}
-            onEnableBrowserChange={props.onEnableBrowserChange}
-            onWebSearchApiKeyChange={props.onWebSearchApiKeyChange}
           />
           {props.error ? (
             <Alert severity="error" sx={{ mt: 2 }}>

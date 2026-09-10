@@ -37,7 +37,9 @@ export function buildGatewaySnapshotExtras(
   const degraded = gateway?.isDegraded() ?? false;
   const caps = gateway?.getOpenClawToolCapabilities?.();
   const capabilityNote = caps
-    ? `；web_search=${caps.webSearch.ready ? "ready" : "off"}；browser=${caps.browser.ready ? "ready" : "off"}`
+    ? caps.browser.ready
+      ? "；电脑执行能力已就绪"
+      : "；电脑执行能力未就绪"
     : "";
   return {
     clawCore: {
@@ -70,6 +72,8 @@ export function buildGatewayDiagnosticsInput(input: {
   recentServerErrorCode: string | null;
   gateway: GatewayStatusPort | null;
   secretsAvailable: boolean;
+  browserProxyEnabled?: boolean;
+  browserProxyUrl?: string | null;
 }): Pick<
   BuildDiagnosticReportInput,
   | "protocolServerReady"
@@ -81,6 +85,8 @@ export function buildGatewayDiagnosticsInput(input: {
   | "openClawWebSearchReady"
   | "openClawBrowserReady"
   | "openClawCapabilityDetail"
+  | "browserProxyEnabled"
+  | "browserProxyUrl"
 > {
   const caps = input.gateway?.getOpenClawToolCapabilities?.();
   return {
@@ -93,8 +99,13 @@ export function buildGatewayDiagnosticsInput(input: {
       input.recentServerErrorCode ?? input.gateway?.getLastRestartError()?.code ?? null,
     openClawWebSearchReady: caps?.webSearch.ready ?? false,
     openClawBrowserReady: caps?.browser.ready ?? false,
-    openClawCapabilityDetail: caps
-      ? `webSearch=${caps.webSearch.detail}; browser=${caps.browser.detail}`
-      : null,
+    // 用户可见 detail 仅浏览器能力，禁止拼 webSearch= 技术串。
+    openClawCapabilityDetail: caps?.browser.ready
+      ? "浏览器与桌面执行已就绪"
+      : caps
+        ? "浏览器能力未就绪"
+        : null,
+    browserProxyEnabled: input.browserProxyEnabled === true,
+    browserProxyUrl: input.browserProxyUrl ?? null,
   };
 }

@@ -136,6 +136,7 @@ export type BridgeUiAction =
   | { type: "pairing.reject"; pairingId: string }
   | { type: "pairing.rescan" }
   | { type: "diagnostics.openLogs" }
+  | { type: "settings.setBrowserProxy"; enabled: boolean; url: string }
   | { type: "zhangBoss.openChat" }
   | { type: "affair.viewDetail"; affairId: string }
   | { type: "affair.pause"; affairId: string }

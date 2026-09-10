@@ -17,9 +17,6 @@ export interface RunConfigGateSubmitInput {
   qwenModel: string;
   qwenAdvancedOpen: boolean;
   qwenWorkspaceId: string;
-  enableWebSearch: boolean;
-  enableBrowser: boolean;
-  webSearchApiKey: string;
 }
 
 /**
@@ -29,10 +26,11 @@ export interface RunConfigGateSubmitInput {
 export async function runConfigGateSubmit(
   input: RunConfigGateSubmitInput,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
+  // 产品安装档：browser 默认开；不走 web_search。
   const webSlice = {
-    enableWebSearch: input.enableWebSearch,
-    enableBrowser: input.enableBrowser,
-    webSearchApiKey: input.webSearchApiKey,
+    enableWebSearch: false,
+    enableBrowser: true,
+    webSearchApiKey: "",
   };
   const outcome = await submitOnboardingConfig(
     input.bridge,

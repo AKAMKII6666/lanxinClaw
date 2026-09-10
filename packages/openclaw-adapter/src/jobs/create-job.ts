@@ -13,8 +13,52 @@ import type { AdapterJobStore } from "./job-store.js";
 import type { AdapterJobRecord, AdapterJobResult, CreateAdapterJobInput } from "./job-types.js";
 import { validateRunSnapshotIdentity } from "../evidence/snapshot-identity.js";
 import { runtimeErrorResult } from "../client/runtime-error-result.js";
+import { toGatewaySessionKey, toJobIdempotencyKey } from "../client/gateway/session-key.js";
 
 const KNOWN_PERMISSION_IDS = new Set<string>(PERMISSION_IDS);
+
+const BROWSER_FIRST_PREFIX =
+  "【执行约束】查资料/查价/搜新闻/打开网页时：必须优先使用 browser 打开目标站并读取可见结果；" +
+  "web_fetch 仅当浏览器不可用或需要原文/API 时使用；不要调用 web_search。\n\n任务目标：";
+
+/**
+ * 查资料类 goal 是否附加 browser-first 委派前缀。
+ * 与 companion `classifyJobWebCapabilityNeed` 对齐，避免对纯本地「查询」误包装。
+ *
+ * @param goal 原始目标
+ * @returns 需要则 true
+ */
+function needsBrowserFirstGoalWrap(goal: string): boolean {
+  const text = goal.trim();
+  if (!text) {
+    return false;
+  }
+  const lower = text.toLowerCase();
+  if (/https?:\/\//i.test(text) || /联网|网页/.test(text)) {
+    return true;
+  }
+  if (/浏览器|打开网页|webpage|browser|点击|gui/.test(text) || /browser/.test(lower)) {
+    return true;
+  }
+  return (
+    /搜索|搜一下|查.{0,8}(价格|新闻|网页|资料)|web_search|google|bing/.test(text) ||
+    /search|news|price/.test(lower)
+  );
+}
+
+/**
+ * 包装 createRun message；job 记录仍存原始 goal。
+ *
+ * @param goal 原始目标
+ * @returns Gateway message
+ */
+function wrapBrowserFirstRunInput(goal: string): string {
+  const trimmed = goal.trim();
+  if (!needsBrowserFirstGoalWrap(trimmed)) {
+    return trimmed;
+  }
+  return `${BROWSER_FIRST_PREFIX}${trimmed}`;
+}
 
 /**
  * 校验创建入参。
@@ -120,13 +164,14 @@ export async function createAdapterJob(
   }
 
   try {
-    const sessionKey = `lanxing-job:${input.jobId}`;
+    const sessionKey = toGatewaySessionKey(input.jobId);
+    const idempotencyKey = toJobIdempotencyKey(input.jobId);
     const now = new Date().toISOString();
     const snapshot = await runtime.createRun({
       jobId: input.jobId,
       affairId: input.affairId,
-      input: input.goal,
-      idempotencyKey: sessionKey,
+      input: wrapBrowserFirstRunInput(input.goal),
+      idempotencyKey,
       workspaceHint: input.workspaceHint ?? null,
       allowedPermissions: [...input.allowedPermissions],
       sessionKey,

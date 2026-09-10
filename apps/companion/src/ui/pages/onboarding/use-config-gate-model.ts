@@ -9,7 +9,6 @@ import type { OnboardingPhase, OnboardingSubmitPayload } from "../../../bridge/c
 import { QWEN_DEFAULT_MODEL_ID, QWEN_DEFAULT_REGION_ID } from "../../../onboarding/presets/qwen.js";
 import type { RendererBridgeApi } from "../../bridge/renderer-api.js";
 import { executeConfigGateSubmit } from "./run-config-gate-submit.js";
-import { useWebToolsFormState } from "./use-web-tools-form-state.js";
 
 const DEFAULT_MODEL_REF: Record<string, string> = {
   qwen: "qwen/qwen3.7-plus",
@@ -31,9 +30,6 @@ export interface ConfigGateModel {
   qwenModel: string;
   qwenAdvancedOpen: boolean;
   qwenWorkspaceId: string;
-  enableWebSearch: boolean;
-  enableBrowser: boolean;
-  webSearchApiKey: string;
   submitting: boolean;
   phase: OnboardingPhase;
   error: string | null;
@@ -47,9 +43,6 @@ export interface ConfigGateModel {
   setQwenModel: (next: string) => void;
   setQwenAdvancedOpen: (next: boolean) => void;
   setQwenWorkspaceId: (next: string) => void;
-  setEnableWebSearch: (next: boolean) => void;
-  setEnableBrowser: (next: boolean) => void;
-  setWebSearchApiKey: (next: string) => void;
   submit: () => Promise<void>;
 }
 
@@ -70,7 +63,6 @@ export function useConfigGateModel(
   const [qwenModel, setQwenModel] = useState(QWEN_DEFAULT_MODEL_ID);
   const [qwenAdvancedOpen, setQwenAdvancedOpen] = useState(false);
   const [qwenWorkspaceId, setQwenWorkspaceId] = useState("");
-  const webTools = useWebToolsFormState();
   const [submitting, setSubmitting] = useState(false);
   const [phase, setPhase] = useState<OnboardingPhase>("verifying_key");
   const [error, setError] = useState<string | null>(null);
@@ -86,9 +78,6 @@ export function useConfigGateModel(
     qwenModel,
     qwenAdvancedOpen,
     qwenWorkspaceId,
-    enableWebSearch: webTools.enableWebSearch,
-    enableBrowser: webTools.enableBrowser,
-    webSearchApiKey: webTools.webSearchApiKey,
     submitting,
     phase,
     error,
@@ -107,9 +96,6 @@ export function useConfigGateModel(
     setQwenModel,
     setQwenAdvancedOpen,
     setQwenWorkspaceId,
-    setEnableWebSearch: webTools.setEnableWebSearch,
-    setEnableBrowser: webTools.setEnableBrowser,
-    setWebSearchApiKey: webTools.setWebSearchApiKey,
     async submit() {
       if (submitting) return;
       setSubmitting(true);
@@ -126,9 +112,6 @@ export function useConfigGateModel(
           qwenModel,
           qwenAdvancedOpen,
           qwenWorkspaceId,
-          enableWebSearch: webTools.enableWebSearch,
-          enableBrowser: webTools.enableBrowser,
-          webSearchApiKey: webTools.webSearchApiKey,
         },
         setError,
         onConfigured,

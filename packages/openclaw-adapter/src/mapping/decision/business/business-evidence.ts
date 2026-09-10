@@ -28,6 +28,13 @@ const EXPLICIT_PATH_RE = /(?:[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]+|(?:^|[\s`"'(])\/
 const COUNT_ENTITY_RE =
   /(?:\d+\s*(?:files?|items?|tests?|个|份|条)|count[=:]\s*\d+|一共|共有|列出了|列出来|listed\s+\d+|passed with\s+\d+)/i;
 
+/** 价格/币价实体（查资料主路径验收）。 */
+const PRICE_ENTITY_RE =
+  /(?:\$\s?\d+(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:USD|USDT|CNY|人民币)|(?:当前)?价格[:：]\s*\$?\s*\d|(?:current\s+)?price[:：]\s*\$?\s*\d)/i;
+
+/** 查价/查资料目标语境。 */
+const RESEARCH_GOAL_RE = /(?:价格|报价|查价|查资料|搜新闻|币价|price|bnb|btc|eth|usd)/i;
+
 /** 桌面/图标清单标题与语义。 */
 const DESKTOP_LIST_HEADER_RE =
   /(?:\*\*)?(?:文件夹|快捷方式(?:\s*\(\.lnk\))?|应用程序和工具|图标名|文件和快捷方式名称|桌面文件|desktop files?)(?:\*\*)?\s*[:：]/i;
@@ -118,24 +125,34 @@ function present(
  * @returns present 分类或 null
  */
 function tryPresentClassification(text: string, goal?: string | null): BusinessEvidenceClassification | null {
-  if (DESKTOP_LIST_HEADER_RE.test(text)) {
-    return present(text, "list_result", "desktop_list_header");
+  const directRules: Array<[RegExp, BusinessEvidenceKind, string]> = [
+    [DESKTOP_LIST_HEADER_RE, "list_result", "desktop_list_header"],
+    [COUNT_ENTITY_RE, "count_result", "count_entity"],
+    [PRICE_ENTITY_RE, "count_result", "price_entity"],
+    [FILE_EXT_RE, "file_result", "file_extension"],
+    [EXPLICIT_PATH_RE, "file_result", "explicit_path"],
+    [/https?:\/\/\S{6,}/i, "url_result", "url"],
+    [RESULT_ENTITY_PHRASE_RE, "file_result", "result_entity_phrase"],
+  ];
+  for (const [pattern, kind, reason] of directRules) {
+    if (pattern.test(text)) {
+      return present(text, kind, reason);
+    }
   }
-  if (COUNT_ENTITY_RE.test(text)) {
-    return present(text, "count_result", "count_entity");
-  }
-  if (FILE_EXT_RE.test(text)) {
-    return present(text, "file_result", "file_extension");
-  }
-  if (EXPLICIT_PATH_RE.test(text)) {
-    return present(text, "file_result", "explicit_path");
-  }
-  if (/https?:\/\/\S{6,}/i.test(text)) {
-    return present(text, "url_result", "url");
-  }
-  if (RESULT_ENTITY_PHRASE_RE.test(text)) {
-    return present(text, "file_result", "result_entity_phrase");
-  }
+  return tryPresentFromBulletList(text, goal);
+}
+
+/**
+ * 列表结构 + 目标联合抬 present。
+ *
+ * @param text 已脱敏文本
+ * @param goal 可选任务目标
+ * @returns present 分类或 null
+ */
+function tryPresentFromBulletList(
+  text: string,
+  goal?: string | null,
+): BusinessEvidenceClassification | null {
   const hasBullets = MULTI_BULLET_LIST_RE.test(text) || bulletItemCount(text) >= 3;
   if (!hasBullets) {
     return null;
@@ -143,6 +160,9 @@ function tryPresentClassification(text: string, goal?: string | null): BusinessE
   const goalText = safeText(goal ?? "");
   if (LIST_GOAL_RE.test(goalText)) {
     return present(text, "list_result", "list_goal_with_bullets");
+  }
+  if (RESEARCH_GOAL_RE.test(goalText) && PRICE_ENTITY_RE.test(text)) {
+    return present(text, "count_result", "research_goal_with_price");
   }
   if (/(?:桌面|文件夹|快捷方式|图标|文件)/.test(text)) {
     return present(text, "list_result", "desktopish_bullet_list");

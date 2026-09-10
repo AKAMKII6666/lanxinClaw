@@ -48,22 +48,28 @@
 
 apiKey 使用 env ref，明文只经子进程环境变量注入，不落配置文件。
 
-用户在 onboarding **明确勾选**后，可额外写入最小网页能力（默认关闭，避免静默扩大攻击面）：
+**产品安装档（默认）**：生成配置时写入浏览器能力，无需用户勾选：
 
-- `tools.web.search.enabled=true` + `provider`（如 brave）
-- `tools.alsoAllow` 含 `group:web` / `browser`
-- `browser.enabled=true`（可选）
+- `browser.enabled=true`（**有头窗口** `headless=false`，用户可见操作过程）
+- `tools.alsoAllow` 含 `browser`
+- 可选：诊断页「托管浏览器走本地代理」**默认开**（`shell-settings.json`）；改开关/地址后点**应用**经 companion 写入 `browser.extraArgs`（如 `--proxy-server=http://127.0.0.1:7890`），并配套：
+  - `browser.ssrfPolicy.dangerouslyAllowPrivateNetwork=true`（代理导航硬需要）
+  - `tools.web.fetch.ssrfPolicy.allowRfc2544BenchmarkRange` + `allowIpv6UniqueLocalRange`（当前 OpenClaw schema 仅允许这两项；写 `dangerouslyAllowPrivateNetwork` 会拒启动）
+  - `tools.web.fetch.useTrustedEnvProxy=true`，并由 Gateway 子进程注入同源 `HTTP_PROXY` / `HTTPS_PROXY`（关代理时显式清空，避免继承父进程）
+  - 再由 `ensureStarted` 热重启 Gateway。关闭代理时不残留上述字段。有 `running` job 时禁止应用代理热重启。
 
-Brave Search key 仅经子进程环境变量 `BRAVE_API_KEY` 注入，**不入** `openclaw.json`。工具可用 ≠ companion 自动授权；每次 job 仍过 permission gate。
+产品**不走** `web_search` 主路径（不要求 Brave key、onboarding 不提供开关）。若将来显式开启搜索，Brave Search key 仅经子进程环境变量 `BRAVE_API_KEY` 注入，**不入** `openclaw.json`。
 
-建单前 companion 会读当前 `openclaw.json` 做配置级能力探针：联网/浏览器意图若能力未就绪，`job.create` 返回 `capability_missing`（`nextStep=configure_openclaw_web_tools`），不得授权后才首次失败。诊断页 probeId：`openclaw.web_search`、`openclaw.browser`。
+Companion 任务发放仍走用户授权 UX（`needs_permission` → 用户确认 → 委派）；OpenClaw 工具默认开与「是否弹授权」分层。`secrets.read` 与工作区越界仍拒绝。
+
+建单前 companion 会读当前 `openclaw.json` 做配置级能力探针：浏览器/联网意图若 browser 未就绪，`job.create` 返回 `capability_missing`（`nextStep=configure_openclaw_browser`）。诊断页对用户展示「电脑执行能力」，不暴露 `web_search` 技术黄灯。升级用户若缺 browser，ensureStarted 会补写配置并重启 Gateway（含将旧 `headless=true` 重写为有头）。
 
 ## 5. Gateway 线协议（协议版本 4）与 adapter 校准
 
 - 握手：WS 打开后服务端先发事件 `connect.challenge { nonce }`；客户端回 `req method="connect"`，params 含 `minProtocol/maxProtocol=4`、`role="operator"`、`scopes=["operator.read","operator.write"]`、`client { id: "gateway-client", mode: "backend", ... }`、`auth { token }`。client.id 有白名单，自定义 id 会被拒绝。缺 `operator.write` 时 `agent` RPC 返回 `missing scope: operator.write`。这些是 OpenClaw Gateway 控制面 scope，不是澜星 `workspace.read` 权限 id。修改 handshake 后必须**重启 Companion 进程**才会加载新 transport；只重跑配置门探针不够。
 - 创建 run：`req method="agent"`，params `{ message, idempotencyKey（必填，作为 runId）, agentId?, sessionKey?, timeout? }`；重复 idempotencyKey 幂等返回 `in_flight`，不得因此创建第二个 Lanxin job。
 - 读取：`req method="agent.wait" { runId, timeoutMs? }`，返回 `ok/error/timeout` 粗状态。`ok` 只证明 agent loop 正常结束，不等于业务成功；`timeout` 需区分 wait-only timeout 与 run terminal timeout。
-- 取消：`req method="chat.abort" { sessionKey?, runId? }`。
+- 取消：`req method="chat.abort" { sessionKey?, runId? }`。adapter 必须传 Gateway canonical `sessionKey`（`agent:main:lanxing-job:<jobId>`）；裸 `lanxing-job:…` 会触发 `runId does not match sessionKey`。
 - 进度：MVP 用短超时轮询 `agent.wait`；后续升级为长连接 observer，声明 `caps: ["tool-events"]`，并结合 event、audit、task、history 做状态 reconcile。
 - `packages/openclaw-adapter` 的 raw-ws transport 已按上述协议校准；`createJob` 以 `lanxing-job:<jobId>` 作为 idempotencyKey。
 

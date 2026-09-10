@@ -119,6 +119,9 @@ export function hasCancelledFinding(evidence: OpenClawExecutionEvidence): boolea
  */
 export function firstBlockingFinding(evidence: OpenClawExecutionEvidence): OpenClawToolFinding | null {
   for (const finding of evidence.toolFindings) {
+    if (isSoftWebSearchFinding(finding)) {
+      continue;
+    }
     if (finding.status === "blocked") {
       return finding;
     }
@@ -144,6 +147,99 @@ export function firstFailedFinding(evidence: OpenClawExecutionEvidence): OpenCla
       (finding) => finding.status === "failed" || finding.status === "timed_out",
     ) ?? null
   );
+}
+
+/**
+ * 是否为可忽略的 web_search 旁路失败（产品默认禁用 search）。
+ *
+ * @param finding 工具证据
+ * @returns 是则 true
+ */
+export function isSoftWebSearchFinding(finding: OpenClawToolFinding): boolean {
+  const name = String(finding.toolName ?? "").toLowerCase();
+  if (name !== "web_search" && !name.includes("web_search")) {
+    return false;
+  }
+  if (finding.status !== "failed" && finding.status !== "blocked" && finding.status !== "unknown") {
+    return false;
+  }
+  const text = `${finding.summary ?? ""} ${finding.errorCode ?? ""}`;
+  return (
+    /disabled|no provider|not configured|unavailable|未启用|不可用|未配置/i.test(text) ||
+    text.trim().length === 0
+  );
+}
+
+/**
+ * 证据中是否已有 browser 工具尝试。
+ *
+ * @param evidence 观测证据
+ * @returns 是则 true
+ */
+export function hasBrowserToolFinding(evidence: OpenClawExecutionEvidence): boolean {
+  return evidence.toolFindings.some((finding) => {
+    const name = String(finding.toolName ?? "").toLowerCase();
+    return name === "browser" || name.startsWith("browser.") || name.includes("browser");
+  });
+}
+
+/**
+ * 是否为 run 未终态、且尚无 browser 尝试时的过早 web_fetch 失败。
+ *
+ * @param finding 工具证据
+ * @param evidence 全量证据
+ * @param rawRunStatus 归一化 run 状态
+ * @returns 应推迟终态则 true
+ */
+export function isPrematureWebFetchFailure(
+  finding: OpenClawToolFinding,
+  evidence: OpenClawExecutionEvidence,
+  rawRunStatus: string | null | undefined,
+): boolean {
+  const name = String(finding.toolName ?? "").toLowerCase();
+  if (name !== "web_fetch" && !name.includes("web_fetch")) {
+    return false;
+  }
+  if (finding.status !== "failed") {
+    return false;
+  }
+  if (hasBrowserToolFinding(evidence)) {
+    return false;
+  }
+  if (hasTerminalLifecycle(evidence)) {
+    return false;
+  }
+  const status = String(rawRunStatus ?? "");
+  if (status === "completed" || status === "failed" || status === "cancelled" || status === "timed_out") {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 读取第一条应推动终态的失败证据（跳过 search 旁路与过早 fetch）。
+ *
+ * @param evidence 观测证据
+ * @param rawRunStatus 归一化状态
+ * @returns 失败证据或 null
+ */
+export function firstActionableFailedFinding(
+  evidence: OpenClawExecutionEvidence,
+  rawRunStatus?: string | null,
+): OpenClawToolFinding | null {
+  for (const finding of evidence.toolFindings) {
+    if (finding.status !== "failed" && finding.status !== "timed_out") {
+      continue;
+    }
+    if (isSoftWebSearchFinding(finding)) {
+      continue;
+    }
+    if (isPrematureWebFetchFailure(finding, evidence, rawRunStatus)) {
+      continue;
+    }
+    return finding;
+  }
+  return null;
 }
 
 /**

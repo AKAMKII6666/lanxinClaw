@@ -21,6 +21,7 @@ import {
   type OpenClawExecutionEvidence,
 } from "../evidence/openclaw-execution-evidence.js";
 import type { AdapterJobRecord } from "../jobs/job-types.js";
+import { toGatewaySessionKey } from "../client/gateway/session-key.js";
 import { decideJobFromEvidence, type OpenClawToLanxinJobDecision } from "./decide-job-from-evidence.js";
 import { isLowSignalText } from "./decision/evidence-helpers.js";
 
@@ -175,7 +176,7 @@ function evidenceForSnapshot(
   job: AdapterJobRecord,
   snapshot: OpenClawRunSnapshot,
 ): OpenClawExecutionEvidence {
-  const sessionKey = job.openclawSessionKey ?? `lanxing-job:${job.jobId}`;
+  const sessionKey = job.openclawSessionKey ?? toGatewaySessionKey(job.jobId);
   if (snapshot.evidence) {
     return {
       ...snapshot.evidence,
