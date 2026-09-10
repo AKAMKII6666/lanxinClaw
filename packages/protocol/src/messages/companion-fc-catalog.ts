@@ -27,6 +27,7 @@ export const COMPANION_FC_NAMES = [
   "companion.accept_affair",
   "companion.send_chat_context",
   "companion.fetch_pending_context",
+  "companion.bind_message",
 ] as const;
 
 /** 张老板 companion FC 名称 */
@@ -121,9 +122,9 @@ export const COMPANION_FC_CATALOG: readonly CompanionFcMapping[] = [
   },
   {
     name: "companion.cancel_affair",
-    emits: ["job.cancel", "affair.close"],
+    emits: ["affair.close"],
     localOnly: false,
-    summary: "用户明确取消整件事务；不是验收通过",
+    summary: "携原请求 ID 请求原子取消事务；等待包含全部子任务的提交结果；不是验收通过",
   },
   {
     name: "companion.accept_affair",
@@ -139,9 +140,15 @@ export const COMPANION_FC_CATALOG: readonly CompanionFcMapping[] = [
   },
   {
     name: "companion.fetch_pending_context",
+    emits: ["chat.read_receipt"],
+    localOnly: true,
+    summary: "查询收件箱与完整原文；交给通话后异步补送可重试的消费回执",
+  },
+  {
+    name: "companion.bind_message",
     emits: [],
     localOnly: true,
-    summary: "消费 pending chat.context_attach；realtime 注入的 FC fallback",
+    summary: "用户确认后将未归属消息绑定明确事务；不授予执行权限",
   },
 ] as const;
 

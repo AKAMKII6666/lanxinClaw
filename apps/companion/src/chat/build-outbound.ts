@@ -51,7 +51,7 @@ export function buildUserChatMessage(
 ): ValidateResult<ChatMessagePayload> {
   const payload: ChatMessagePayload = {
     chatMessageId: createChatMessageId(),
-    text: text.trim(),
+    text,
     authorKind: "user",
     sentAt: sentAt ?? new Date().toISOString(),
   };
@@ -80,7 +80,7 @@ export function buildContextAttach(
 ): ValidateResult<ChatContextAttachPayload> {
   const payload: ChatContextAttachPayload = {
     attachId: createAttachId(),
-    text: text.trim(),
+    text,
     target,
     contentKind,
     sentAt: sentAt ?? new Date().toISOString(),

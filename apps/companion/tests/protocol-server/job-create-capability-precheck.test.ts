@@ -17,6 +17,7 @@ function fakeBackend(opts: { affair?: boolean; job?: unknown } = {}) {
     jobs.set("job_1", opts.job);
   }
   return {
+    getAffairActions: () => ({ isClosing: () => false }),
     getState: () => ({
       seenMessages: new Set<string>(),
       affairs,

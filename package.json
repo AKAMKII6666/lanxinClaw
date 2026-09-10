@@ -26,7 +26,10 @@
     "dev:companion": "npm run dev:shell -w @lanxin-claw/companion",
     "start:companion": "npm run start:shell -w @lanxin-claw/companion",
     "quality": "node scripts/quality/quality.mjs",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "sync:phone-contract": "tsx scripts/contracts/sync-phone-state-contract.ts",
+    "check:phone-contract": "tsx scripts/contracts/sync-phone-state-contract.ts --check",
+    "test:cross-repo": "npm run check:phone-contract && tsx --test scripts/cross-repo/*.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

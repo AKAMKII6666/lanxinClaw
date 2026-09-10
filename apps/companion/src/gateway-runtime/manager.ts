@@ -9,11 +9,11 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
-import path from "node:path";
 import type { Logger } from "pino";
+import { createGatewayEnvironment } from "./lifecycle/environment.js";
 
-/** 默认启动超时毫秒（覆盖 Windows 冷启动约 60s，留余量） */
-export const DEFAULT_STARTUP_TIMEOUT_MS = 90_000;
+/** 默认启动超时：首次启动包含所选模型 provider 安装，保留有界的五分钟窗口。 */
+export const DEFAULT_STARTUP_TIMEOUT_MS = 300_000;
 
 /**
  * OpenClaw gateway 就绪 stdout 标记。
@@ -43,7 +43,7 @@ export interface GatewayRuntimeManagerOptions {
   onStderr?: (line: string) => void;
   /** 退出回调（含崩溃重启策略由调用方决定） */
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
-  /** 启动超时毫秒；默认 90000 */
+  /** 启动超时毫秒；默认 300000，超时仍停止进程并报告未就绪 */
   startupTimeoutMs?: number;
   /** 日志；可选 */
   logger?: Logger;
@@ -86,14 +86,10 @@ export class GatewayRuntimeManager {
     }
     const port = this.options.port ?? (await findFreePort());
     const nodeBin = this.options.nodeBin ?? process.execPath;
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      OPENCLAW_STATE_DIR: this.options.stateDir,
-      OPENCLAW_CONFIG_PATH: path.join(this.options.stateDir, "openclaw.json"),
-      OPENCLAW_OAUTH_DIR: path.join(this.options.stateDir, "credentials"),
-      OPENCLAW_GATEWAY_PORT: String(port),
-      ...(this.options.env ?? {}),
-    };
+    const env = createGatewayEnvironment({
+      parent: process.env, stateDir: this.options.stateDir, port,
+      ...(this.options.env ? { explicit: this.options.env } : {}),
+    });
     this.options.logger?.info({ port }, "启动自托管 OpenClaw gateway");
     const child = spawn(nodeBin, [this.options.openclawEntry, "gateway", "run"], {
       env,

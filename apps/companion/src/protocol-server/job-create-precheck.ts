@@ -56,8 +56,14 @@ export function precheckJobCreate(
       retryable: false,
     };
   }
+  if (backend.getAffairActions().isClosing(payload.affairId) ||
+      ["closed", "canceled"].includes(state.affairs.get(payload.affairId)?.status ?? "")) {
+    return { ok: false, code: "affair_closing", message: "事务正在关闭，不能再创建 job", retryable: false };
+  }
   const existing = state.jobs.get(payload.jobId);
   if (!existing) {
+    const conflict = precheckCurrentExecution(backend, payload);
+    if (conflict) return conflict;
     const capabilityError = precheckOpenClawCapability(payload, capabilityPort);
     if (capabilityError) {
       return capabilityError;
@@ -73,6 +79,16 @@ export function precheckJobCreate(
     };
   }
   return { ok: true, duplicate: true };
+}
+
+function precheckCurrentExecution(backend: CompanionBackendRuntime, payload: JobPayload): JobCreatePrecheckResult | null {
+  if (payload.purpose === "exploration") return null;
+  const state = backend.getState();
+  const currentId = state.affairs.get(payload.affairId)?.currentJobId;
+  const current = currentId ? state.jobs.get(currentId) : null;
+  if (!current || current.jobId === payload.jobId || current.purpose === "exploration") return null;
+  return ["completed", "failed", "canceled"].includes(current.status) ? null
+    : { ok: false, code: "current_job_not_stopped", message: "当前执行任务尚未停止，不能被新任务替换", retryable: false };
 }
 
 function precheckOpenClawCapability(

@@ -1,3 +1,4 @@
+import { queueDesktopMessage } from "./message-outbox.js";
 /**
  * 将控制面板 UI 意图转为协议出站。
  *
@@ -20,15 +21,11 @@ import {
 import type { PendingContextQueue } from "../chat/channel/pending-context.js";
 import {
   buildAffairResumeEnvelope,
-  buildAffairCloseEnvelope,
   buildAffairUpdateEnvelope,
-  buildChatMessageEnvelope,
-  buildContextAttachEnvelope,
   buildPermissionDecisionEnvelope,
   type OutboundParty,
 } from "./outbound-envelopes.js";
 import {
-  createBridgeActionReceiptId,
   deliveryFor,
   ok,
   rejected,
@@ -87,11 +84,8 @@ export function dispatchBridgeProtocolAction(
   if (action.type === "affair.pause") {
     return dispatchAffairPause(action, deps);
   }
-  if (action.type === "affair.accept") {
-    return dispatchAffairAccept(action, deps);
-  }
-  if (action.type === "affair.cancel") {
-    return dispatchAffairCancel(action, deps);
+  if (action.type === "affair.accept" || action.type === "affair.cancel") {
+    return rejected(action, deps, "事务关闭必须调用共同协调器", "affair_action_required");
   }
   if (action.type === "affair.requestRevision") {
     return dispatchAffairRevision(action, deps);
@@ -138,16 +132,11 @@ function dispatchChatMessage(
   if (action.type !== "chat.sendMessage") {
     return ok(null);
   }
-  const party = requireOutboundParty(deps);
-  if (!party.ok) {
-    return rejected(action, deps, party.message, party.code);
-  }
   const built = buildUserChatMessage(action.text, action.affairId);
   if (!built.ok) {
     return rejected(action, deps, built.error.message, built.error.code);
   }
-  deps.broadcast(buildChatMessageEnvelope(party.value, built.value));
-  return ok(deliveryFor(action, deps, "sent_to_phone", "消息已发送给电话端", null));
+  return queueDesktopMessage(action, built.value, deps);
 }
 
 /**
@@ -172,31 +161,7 @@ function dispatchAttachContext(
   if (!built.ok) {
     return rejected(action, deps, built.error.message, built.error.code);
   }
-  const party = deps.getParty();
-  const canSend = deps.isSessionAuthenticated() && party !== null;
-  // 通话真源在电话侧：有 session 即直发；phone 非通话时只入队不注入
-  if (canSend) {
-    deps.broadcast(buildContextAttachEnvelope(party, built.value));
-    return ok(deliveryFor(action, deps, "sent_to_phone", "上下文已发送给电话端", null));
-  }
-  const delivery = deliveryFor(
-    action,
-    deps,
-    "queued_until_session",
-    "上下文已排队，等待电话 session 后发送",
-    "session_not_authenticated",
-  );
-  const queued = deps.pendingContext.enqueue({
-    text: built.value.text,
-    contentKind: action.contentKind,
-    target: action.target,
-    affairId: action.affairId ?? null,
-    actionReceiptId: delivery.actionReceiptId,
-    jobId: delivery.jobId,
-  });
-  return queued.ok
-    ? ok(delivery)
-    : rejected(action, deps, queued.message, "pending_context_rejected");
+  return queueDesktopMessage(action, built.value, deps);
 }
 
 /**
@@ -261,64 +226,6 @@ function dispatchAffairPause(
   return ok(deliveryFor(action, deps, "sent_to_phone", "暂停请求已发送给电话端", null));
 }
 
-function dispatchAffairAccept(
-  action: BridgeUiAction,
-  deps: BridgeProtocolOutboundDeps,
-): BridgeProtocolActionDispatchResult {
-  if (action.type !== "affair.accept") {
-    return ok(null);
-  }
-  const party = requireOutboundParty(deps);
-  if (!party.ok) {
-    return rejected(action, deps, party.message, party.code);
-  }
-  const affair = deps.getAffair(action.affairId);
-  if (!affair) {
-    return rejected(action, deps, "找不到对应事务", "affair_not_found");
-  }
-  if (affair.status !== "waiting_acceptance" || !canTransitionAffairStatus(affair.status, "closed")) {
-    return rejected(action, deps, `affair 状态 ${affair.status} 不可验收关闭`, "affair_accept_rejected");
-  }
-  deps.broadcast(
-    buildAffairCloseEnvelope(party.value, {
-      ...affair,
-      status: "closed",
-      blockedReason: null,
-      resumeCondition: null,
-    }),
-  );
-  return ok(deliveryFor(action, deps, "sent_to_phone", "验收关闭请求已发送给电话端", null));
-}
-
-function dispatchAffairCancel(
-  action: BridgeUiAction,
-  deps: BridgeProtocolOutboundDeps,
-): BridgeProtocolActionDispatchResult {
-  if (action.type !== "affair.cancel") {
-    return ok(null);
-  }
-  const party = requireOutboundParty(deps);
-  if (!party.ok) {
-    return rejected(action, deps, party.message, party.code);
-  }
-  const affair = deps.getAffair(action.affairId);
-  if (!affair) {
-    return rejected(action, deps, "找不到对应事务", "affair_not_found");
-  }
-  if (affair.status === "closed" || affair.status === "canceled" || !canTransitionAffairStatus(affair.status, "canceled")) {
-    return rejected(action, deps, `affair 状态 ${affair.status} 不可取消`, "affair_cancel_rejected");
-  }
-  deps.broadcast(
-    buildAffairCloseEnvelope(party.value, {
-      ...affair,
-      status: "canceled",
-      blockedReason: null,
-      resumeCondition: null,
-    }),
-  );
-  return ok(deliveryFor(action, deps, "sent_to_phone", "取消事务请求已发送给电话端", null));
-}
-
 function dispatchAffairRevision(
   action: BridgeUiAction,
   deps: BridgeProtocolOutboundDeps,
@@ -366,41 +273,7 @@ function attachSystemNoteToAffair(
   if (!built.ok) {
     return rejected(action ?? { type: "affair.requestAcceptance", affairId }, deps, built.error.message, built.error.code);
   }
-  const party = deps.getParty();
-  const canSend = deps.isSessionAuthenticated() && party !== null;
-  if (canSend) {
-    deps.broadcast(buildContextAttachEnvelope(party, built.value));
-    return ok(deliveryFor(
-      action ?? { type: "affair.requestAcceptance", affairId },
-      deps,
-      "sent_to_phone",
-      "请求已发送给电话端，等待张老板消费或回报",
-      null,
-    ));
-  }
-  const queuedDelivery = deliveryFor(
-    action ?? { type: "affair.requestAcceptance", affairId },
-    deps,
-    "queued_until_session",
-    "请求已排队，等待电话 session 后发送给张老板",
-    "session_not_authenticated",
-  );
-  const queued = deps.pendingContext.enqueue({
-    text: built.value.text,
-    contentKind: "note",
-    target: "affair",
-    affairId,
-    actionReceiptId: queuedDelivery.actionReceiptId,
-    jobId: queuedDelivery.jobId,
-  });
-  return queued.ok
-    ? ok(queuedDelivery)
-    : rejected(
-      action ?? { type: "affair.requestAcceptance", affairId },
-      deps,
-      queued.message,
-      "pending_context_rejected",
-    );
+  return queueDesktopMessage(action ?? { type: "affair.requestAcceptance", affairId }, built.value, deps);
 }
 
 /**
@@ -422,33 +295,4 @@ function requireOutboundParty(
   return { ok: true, value: party };
 }
 
-/**
- * session.accepted 后刷出 pending context。
- *
- * @param deps 依赖
- */
-export function flushPendingContext(deps: BridgeProtocolOutboundDeps): void {
-  if (!deps.isSessionAuthenticated()) {
-    return;
-  }
-  const party = deps.getParty();
-  if (!party) {
-    return;
-  }
-  for (const item of deps.pendingContext.drain()) {
-    const built = buildContextAttach(item.text, item.target, item.contentKind, item.affairId);
-    if (!built.ok) {
-      continue;
-    }
-    deps.broadcast(buildContextAttachEnvelope(party, built.value));
-    deps.recordActionDelivery?.({
-      actionReceiptId: item.actionReceiptId ?? createBridgeActionReceiptId(),
-      status: "sent_to_phone",
-      affairId: item.affairId,
-      jobId: item.jobId ?? (item.affairId ? deps.getAffair(item.affairId)?.currentJobId ?? null : null),
-      deliveredAt: new Date().toISOString(),
-      reasonCode: null,
-      message: "已从待投递队列发送给电话端，等待张老板消费或回报",
-    });
-  }
-}
+export { flushPendingContext } from "./message-outbox.js";

@@ -6,14 +6,14 @@
  * 副作用：broadcast、delegator、打开日志目录。
  */
 
+import { runShellAffairClose } from "./affair-actions.js";
 import type { Logger } from "pino";
 import type { BridgeActionResult, BridgeUiAction } from "../../bridge/contract.js";
 import type { CompanionBackendRuntime } from "../../backend/runtime.js";
 import type { JobDelegator } from "../../jobs/delegation/delegator.js";
 import type { ApplyProtocolResult } from "../../state/types.js";
 import { dispatchBridgeProtocolAction } from "../../protocol-server/bridge-actions.js";
-import { buildJobCanceledEnvelope } from "../../protocol-server/outbound-envelopes.js";
-import type { JobPayload, ProtocolEnvelope } from "@lanxin-claw/protocol";
+import type { ProtocolEnvelope } from "@lanxin-claw/protocol";
 
 /**
  * @param input 壳侧依赖
@@ -26,6 +26,7 @@ export async function runShellBridgeAction(
     backend: CompanionBackendRuntime;
     getDelegator: () => JobDelegator | null;
     broadcast: (envelope: ProtocolEnvelope) => ApplyProtocolResult | void;
+    sendEnvelope?: (envelope: ProtocolEnvelope) => void;
     approvePairing: ((pairingId: string) => Promise<void>) | null;
     openLogDir: () => void;
     relaunchCompanion?: () => void;
@@ -91,12 +92,9 @@ export async function runShellBridgeAction(
       delegator?.rejectPermission(action.permissionRequestId, reason);
     }
   } else if (action.type !== "permission.decide" && result.ok) {
-    if (action.type === "affair.cancel" && result.ok) {
-      const canceled = await cancelCurrentJobIfNeeded(input, action.affairId);
-      if (!canceled.ok) {
-        markBridgeResultFailed(result, canceled.code, canceled.message, canceled.retryable);
-        return;
-      }
+    if (action.type === "affair.cancel" || action.type === "affair.accept") {
+      await runShellAffairClose({ ...input, sendEnvelope: input.sendEnvelope ?? (() => {}) }, action, result);
+      return;
     }
     const outboundResult = dispatchBridgeProtocolAction(action, outbound);
     if (outboundResult.delivery) {
@@ -104,101 +102,12 @@ export async function runShellBridgeAction(
     }
     if (outboundResult.error) {
       input.logger.warn({ outboundError: outboundResult.error, action: action.type }, "bridge 出站失败");
+      markBridgeResultFailed(result, outboundResult.delivery?.reasonCode ?? "outbound_failed", outboundResult.error, true);
     }
   }
   if (action.type === "diagnostics.openLogs") {
     input.openLogDir();
   }
-}
-
-async function cancelCurrentJobIfNeeded(
-  input: {
-    desktopDeviceId: string;
-    backend: CompanionBackendRuntime;
-    getDelegator: () => JobDelegator | null;
-    broadcast: (envelope: ProtocolEnvelope) => ApplyProtocolResult | void;
-    logger: Logger;
-  },
-  affairId: string,
-): Promise<{ ok: true } | { ok: false; code: string; message: string; retryable: boolean }> {
-  const affair = input.backend.getState().affairs.get(affairId);
-  const job = affair?.currentJobId ? input.backend.getState().jobs.get(affair.currentJobId) : null;
-  if (!job || job.status === "completed" || job.status === "failed" || job.status === "canceled") {
-    return { ok: true };
-  }
-  if (job.status === "needs_permission") {
-    input.backend.getPermissionGate().expirePendingForJob(job.jobId);
-    return broadcastNeedsPermissionJobCanceled(input, job, affairId);
-  }
-  if (!input.getDelegator()) {
-    return {
-      ok: false,
-      code: "job_cancel_unavailable",
-      message: "当前执行器不可用，不能确认 job 已取消",
-      retryable: true,
-    };
-  }
-  try {
-    await input.getDelegator()?.cancelJob({ jobId: job.jobId, affairId });
-    return { ok: true };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown";
-    input.logger.warn(
-      {
-        affairId,
-        jobId: job.jobId,
-        error: message,
-      },
-      "事务取消时 adapter job 取消失败",
-    );
-    return {
-      ok: false,
-      code: "job_cancel_failed",
-      message: `取消当前 job 失败：${message}`,
-      retryable: true,
-    };
-  }
-}
-
-function broadcastNeedsPermissionJobCanceled(
-  input: {
-    desktopDeviceId: string;
-    backend: CompanionBackendRuntime;
-    broadcast: (envelope: ProtocolEnvelope) => ApplyProtocolResult | void;
-    logger: Logger;
-  },
-  job: JobPayload,
-  affairId: string,
-): { ok: true } | { ok: false; code: string; message: string; retryable: boolean } {
-  const phoneDeviceId = input.backend.getState().connection.phoneDeviceId;
-  const canceled: JobPayload = {
-    ...job,
-    status: "canceled",
-    progressSummary: job.progressSummary || "canceled_by_affair",
-    blockedReason: null,
-    resumeCondition: null,
-    statusReasonCode: "lanxin.affair_canceled",
-    statusObservedAt: new Date().toISOString(),
-  };
-  const envelope = buildJobCanceledEnvelope(
-    {
-      desktopDeviceId: input.desktopDeviceId,
-      phoneDeviceId: phoneDeviceId ?? "unknown",
-    },
-    canceled,
-  );
-  if (!phoneDeviceId) {
-    const applied = input.backend.applyProtocolEnvelope(envelope);
-    return applied.ok
-      ? { ok: true }
-      : { ok: false, code: applied.code, message: applied.message, retryable: applied.retryable };
-  }
-  const applied = input.broadcast(envelope);
-  if (applied && !applied.ok) {
-    return { ok: false, code: applied.code, message: applied.message, retryable: applied.retryable };
-  }
-  input.logger.info({ affairId, jobId: job.jobId }, "事务取消时 needs_permission job 已本地取消");
-  return { ok: true };
 }
 
 function markBridgeResultFailed(

@@ -15,7 +15,15 @@ import type {
   ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
 import type { BridgeActionDelivery } from "../bridge/contract.js";
+import type { AffairActionRecord } from "../affairs/actions/types.js";
 import type { AuditRecordView } from "../audit/types.js";
+
+/** 消费回执及本地认证来源；旧镜像可缺来源字段。 */
+export interface ChatReceiptRecord extends ChatReadReceiptPayload {
+  phoneDeviceId?: string;
+  desktopDeviceId?: string;
+  receiptMessageId?: string;
+}
 
 /**
  * 后端已见消息记录。
@@ -55,6 +63,8 @@ export interface CompanionBackendState {
   updatedAt: string;
   /** 连接状态 */
   connection: CompanionConnectionState;
+  /** 持久化关闭请求与幂等提交结果 */
+  affairActions: Map<string, AffairActionRecord>;
   /** affairs 镜像 */
   affairs: Map<string, AffairPayload>;
   /** jobs 镜像 */
@@ -64,7 +74,7 @@ export interface CompanionBackendState {
   /** context_attach 消息 */
   contextAttachments: ChatContextAttachPayload[];
   /** 已读回执 */
-  chatReceipts: ChatReadReceiptPayload[];
+  chatReceipts: ChatReceiptRecord[];
   /** audit 视图 */
   auditRecords: AuditRecordView[];
   /** 最近 UI action 投递回执；只证明投递事实，不证明业务完成 */

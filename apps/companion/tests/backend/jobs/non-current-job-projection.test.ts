@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createEnvelope } from "@lanxin-claw/protocol";
-import { createCompanionBackendRuntime } from "../../src/backend/runtime.js";
+import { createCompanionBackendRuntime } from "../../../src/backend/runtime.js";
 
 describe("non-current job projection gate", () => {
   it("非当前 job 的 completed 迟到不得把 affair 推到 waiting_acceptance", () => {

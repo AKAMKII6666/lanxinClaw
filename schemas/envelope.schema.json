@@ -7,7 +7,7 @@
   "properties": {
     "protocolVersion": {
       "type": "string",
-      "const": "0.1"
+      "const": "0.2"
     },
     "messageId": {
       "type": "string",

@@ -1,5 +1,5 @@
 {
-  "protocolVersion": "0.1",
+  "protocolVersion": "0.2",
   "messageId": "msg_job_completed_001",
   "correlationId": "msg_job_create_001",
   "sentAt": "2026-07-22T00:20:00.000Z",

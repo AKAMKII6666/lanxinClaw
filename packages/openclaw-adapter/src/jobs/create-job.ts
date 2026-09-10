@@ -6,7 +6,7 @@
  * 副作用：写 job store；调用 runtime（可能网络 I/O）。
  */
 
-import { PERMISSION_IDS } from "@lanxin-claw/protocol";
+import { PERMISSION_IDS, permissionInferenceText } from "@lanxin-claw/protocol";
 import type { OpenClawRuntimeClient } from "../client/runtime-client.js";
 import { applyRunSnapshotToJob } from "../mapping/apply-run-snapshot.js";
 import type { AdapterJobStore } from "./job-store.js";
@@ -29,7 +29,7 @@ const BROWSER_FIRST_PREFIX =
  * @returns 需要则 true
  */
 function needsBrowserFirstGoalWrap(goal: string): boolean {
-  const text = goal.trim();
+  const text = permissionInferenceText(goal).trim();
   if (!text) {
     return false;
   }

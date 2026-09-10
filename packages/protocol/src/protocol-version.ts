@@ -7,7 +7,7 @@
  */
 
 /** 当前 wire / UI schema 版本；须与顶层 schemas 的 const 对齐 */
-export const PROTOCOL_VERSION = "0.1" as const;
+export const PROTOCOL_VERSION = "0.2" as const;
 
 /** 协议版本字面量类型 */
 export type ProtocolVersion = typeof PROTOCOL_VERSION;

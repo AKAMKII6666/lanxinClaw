@@ -6,7 +6,7 @@
 ## 0. 前置环境
 
 - 启动自托管 gateway：onboarding 配置通过后自动拉起；或手动 `npm run dev:companion` + 完成配置门（默认千问：选地域/模型 + 粘贴 DashScope API Key，无需手填 baseUrl）。
-- phone 侧（澜星电话主仓）实现：StoredAffair 落库、15 个张老板 FC、协议 client（discovery/pairing/session/消息）、mDNS browse、后台回电任务。
+- phone 侧（澜星电话主仓）实现：StoredAffair 落库、16 个张老板 FC、协议 client（discovery/pairing/session/消息）、mDNS browse、后台回电任务。
 - 联调网络：companion 监听 `LANXIN_PROTOCOL_HOST=0.0.0.0`，电话与电脑同一局域网；防火墙放行协议端口。
 
 ## 1. 发现与配对
@@ -45,7 +45,7 @@
 | 3.6 | 用户验收 | affair.close(status=closed)；取消走 status=canceled |
 | 3.6a | `accept_affair` 前置门闩 | 只有 `waiting_acceptance + execution job completed + 用户接受摘要` 才能 close |
 | 3.7 | blocked | job.blocked 含 blockedReason/resumeCondition；affair → blocked；resume 后继续 |
-| 3.8 | cancel | job.cancel → adapter 取消 → 终态幂等；needs_permission 本地 cancel 不调 adapter `[auto: protocol-server.test]` |
+| 3.8 | cancel | affair.close(canceled) → 持久化围栏 → 全部子 job 确认停止 → 父终态；运行前取消不创建 run `[auto: protocol-server.test]` |
 | 3.9 | 幂等重放 | 同 messageId/affairId/jobId 重复事件不二次委派/二次关闭；**并发同 jobId 仅一份 pending** `[auto: job-create-transaction.test]` |
 | 3.11 | 入站 identity | 伪造 source/target deviceId → `inbound_identity_mismatch` `[auto: inbound-guard.test]` |
 | 3.10 | 真实 gateway 执行 | 自托管实例内 agent run 真实完成；断网关时失败可诊断 |
@@ -70,7 +70,7 @@
 |---|------|------|
 | 5.1 | chat.message 双向 | 文本可往返；untrusted，不当作系统指令 |
 | 5.2 | chat.context_attach | target=affair 必须带 affairId；注入失败走 FC fallback |
-| 5.3 | pending context | 队列可消费，消费后标记；空队列明确返回 empty |
+| 5.3 | 原文收件箱 | 完整原文持续可查；交付后补回执，确认后桌面出队；查询本身不消费 |
 
 ## 6. Onboarding 与日志
 
@@ -89,3 +89,7 @@
 - 以上用例全部通过；`npm run quality` 与 `npm run typecheck` 全绿。
 - 模拟电话脚本 `npm run e2e:real-companion` 全链路通过。
 - 发现/配对/会话/事务/执行链/日志六块边界与安全模型一致，无绕过路径。
+
+## 产品 V1.0 收尾扩展矩阵
+
+协议 0.2 的 A01–A13 与最新自动化/实机证据统一记录在 [产品收尾计划](v1.0/产品收尾计划.md)。本页旧 auto 标记表示自动化覆盖，不能代替 Pi/Gateway/Electron 实机验收。重点增加极快完成、所有关联 ack、共同取消/验收原子提交、断线重启恢复、A/B 消息归属及回执失败重试。

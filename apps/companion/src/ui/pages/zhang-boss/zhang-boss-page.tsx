@@ -10,10 +10,8 @@ import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState, type ReactElement } from "react";
-import { guessContentKind } from "../../../chat/build-outbound.js";
 import { projectZhangBossPanelFromSnapshot } from "../../../chat/snapshot-panel-state.js";
 import type {
-  ChatContentKind,
   ZhangBossPanelView,
 } from "../../../chat/views.js";
 import type { RendererBridgeApi } from "../../bridge/renderer-api.js";
@@ -39,7 +37,6 @@ export function ZhangBossPage(props: { bridge: RendererBridgeApi }): ReactElemen
     attachHistory: [],
   });
   const [draft, setDraft] = useState("");
-  const [contentKind, setContentKind] = useState<ChatContentKind>("note");
   const [errorText, setErrorText] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,10 +67,6 @@ export function ZhangBossPage(props: { bridge: RendererBridgeApi }): ReactElemen
   const bindings = createZhangBossComposerBindings({
     bridge: props.bridge,
     draft,
-    contentKind,
-    affairId: panel.currentAffair?.affairId ?? null,
-    activeCallLabel: panel.activeCallId ? `通话 ${panel.activeCallId}` : "当前通话",
-    affairLabel: panel.currentAffair ? `事务 ${panel.currentAffair.affairId}` : "指定事务",
     fail,
     onOk: clearDraftAfterOk,
   });
@@ -93,18 +86,8 @@ export function ZhangBossPage(props: { bridge: RendererBridgeApi }): ReactElemen
       <ZhangBossAttachHistory items={panel.attachHistory} />
       <ZhangBossComposer
         draft={draft}
-        contentKind={contentKind}
-        canAttachAffair={panel.currentAffair !== null}
-        onDraftChange={(value) => {
-          setDraft(value);
-          if (value.trim().length > 0) {
-            setContentKind(guessContentKind(value));
-          }
-        }}
-        onContentKindChange={setContentKind}
+        onDraftChange={setDraft}
         onSendMessage={bindings.onSendMessage}
-        onAttachActiveCall={bindings.onAttachActiveCall}
-        onAttachAffair={bindings.onAttachAffair}
       />
     </Box>
   );

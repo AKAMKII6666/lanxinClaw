@@ -1,100 +1,33 @@
 /**
  * 自托管 gateway 运行时服务：写配置、启动进程、提供 adapter 与探针入口。
  */
+import { prepareGatewayLaunch } from "./lifecycle/launch.js";
+import { prepareRuntimeProvider } from "./lifecycle/provider/bootstrap.js";
 
+
+import {
+createGatewayRuntimeClient,
+OpenClawAdapter
+} from "@lanxin-claw/openclaw-adapter";
 import fs from "node:fs";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
 import {
-  createGatewayRuntimeClient,
-  OpenClawAdapter,
-  type AdapterJobStore,
-} from "@lanxin-claw/openclaw-adapter";
-import type { Logger } from "pino";
-import {
-  generateOpenClawConfig,
-  OPENCLAW_MODEL_KEY_ENV,
-  OPENCLAW_BRAVE_KEY_ENV,
-  providerMeta,
-} from "./openclaw-config.js";
-import {
-  summarizeOpenClawToolCapabilitiesFromText,
-  type OpenClawToolCapabilitySummary,
-} from "./openclaw-capability.js";
-import { redactOpenClawRuntimeLine } from "./redact-runtime-line.js";
-import { sameGatewayRuntimeInput } from "./same-runtime-input.js";
-import {
-  DEFAULT_STARTUP_TIMEOUT_MS,
-  findFreePort,
-  GatewayRuntimeManager,
-  type GatewayRuntimeManagerOptions,
+GatewayRuntimeManager
 } from "./manager.js";
 import {
-  DEFAULT_GATEWAY_RESTART_DELAY_MS,
-  MAX_GATEWAY_RESTART_ATTEMPTS,
-  nextGatewayRestartDelayMs,
-  shouldRetryGatewayRestart,
+summarizeOpenClawToolCapabilitiesFromText,
+type OpenClawToolCapabilitySummary,
+} from "./openclaw-capability.js";
+import {
+OPENCLAW_BRAVE_KEY_ENV
+} from "./openclaw-config.js";
+import {
+DEFAULT_GATEWAY_RESTART_DELAY_MS,
+MAX_GATEWAY_RESTART_ATTEMPTS,
+nextGatewayRestartDelayMs,
+shouldRetryGatewayRestart,
 } from "./policy/restart-policy.js";
-
-/** 服务选项 */
-export interface GatewayRuntimeServiceOptions {
-  /** openclaw 入口（openclaw.mjs 或 dist/index.js 绝对路径） */
-  openclawEntry: string;
-  /** node 可执行文件；缺省 process.execPath */
-  nodeBin?: string;
-  /** 隔离 state 目录（含 openclaw.json 与 credentials） */
-  stateDir: string;
-  /** 监听 host；默认 127.0.0.1 */
-  host?: string;
-  /** OpenClaw 自身日志文件；默认 <stateDir>/logs/openclaw-runtime.log */
-  logFile?: string;
-  /** 首次崩溃重启延迟毫秒；之后指数退避。默认 1000 */
-  restartDelayMs?: number;
-  /** 连续自动重启上限；默认 8 */
-  maxRestartAttempts?: number;
-  /** 启动超时毫秒；默认 90000 */
-  startupTimeoutMs?: number;
-  /** 日志 */
-  logger?: Logger;
-  /** adapter job store；Electron main 注入文件实现 */
-  adapterJobStore?: AdapterJobStore;
-}
-
-/** 启动入参（来自 onboarding 配置 + 工作区） */
-export interface StartGatewayRuntimeInput {
-  /** 模型 provider 标识 */
-  provider: string;
-  /** 模型 API key（仅内存，注入子进程 env） */
-  apiKey: string;
-  /** provider 端点（openai-compatible/local） */
-  endpoint: string | null;
-  /** 模型引用（provider/model） */
-  modelRef: string;
-  /** agent 工作区 */
-  workspace: string;
-  /** 用户同意启用网页搜索 */
-  enableWebSearch?: boolean;
-  /** 用户同意启用 browser */
-  enableBrowser?: boolean;
-  /** web search API key（仅 env，不入 json） */
-  webSearchApiKey?: string;
-  /** 托管浏览器走本地代理；默认 false */
-  browserProxyEnabled?: boolean;
-  /** 本地代理 URL */
-  browserProxyUrl?: string | null;
-}
-
-/** 运行句柄 */
-export interface GatewayRuntimeHandle {
-  /** WebSocket URL */
-  url: string;
-  /** 本地 token */
-  token: string;
-  /** 已连 runtime 的 adapter */
-  adapter: OpenClawAdapter;
-  /** 停止并清理 */
-  stop: () => Promise<void>;
-}
+import { sameGatewayRuntimeInput } from "./same-runtime-input.js";
 
 /**
  * 自托管 gateway 运行时服务。
@@ -112,6 +45,7 @@ export class GatewayRuntimeService {
   private lastRestartError: { code: string; message: string } | null = null;
   /** 进行中的 ensureStarted，避免并发双拉起 */
   private startInFlight: Promise<GatewayRuntimeHandle> | null = null;
+  private startAbort: AbortController | null = null;
 
   /**
    * @param options 选项
@@ -196,8 +130,10 @@ export class GatewayRuntimeService {
       await this.stopRunningInstance();
     }
     this.lastInput = input;
-    this.startInFlight = this.startFresh(input).finally(() => {
+    this.startAbort = new AbortController();
+    this.startInFlight = this.startFresh(input, this.startAbort.signal).finally(() => {
       this.startInFlight = null;
+      this.startAbort = null;
     });
     return this.startInFlight;
   }
@@ -225,96 +161,25 @@ export class GatewayRuntimeService {
    * @param input 启动入参
    * @returns 运行句柄
    */
-  private async startFresh(input: StartGatewayRuntimeInput): Promise<GatewayRuntimeHandle> {
+  private async startFresh(input: StartGatewayRuntimeInput, signal: AbortSignal): Promise<GatewayRuntimeHandle> {
     if (this.handle && this.manager?.isRunning()) {
       return this.handle;
     }
-    const meta = providerMeta(input.provider, input.endpoint, input.modelRef);
-    this.token = randomToken();
-    const port = await findFreePort();
-    const stateDir = this.options.stateDir;
-    fs.mkdirSync(stateDir, { recursive: true });
-    const logFile = this.options.logFile ?? path.join(stateDir, "logs", "openclaw-runtime.log");
-    fs.mkdirSync(path.dirname(logFile), { recursive: true });
-    const configText = generateOpenClawConfig({
-      token: this.token,
-      port,
-      modelRef: input.modelRef,
-      providerId: meta.providerId,
-      withApiKey: meta.needsKey && input.apiKey.trim().length > 0,
-      baseUrl: meta.baseUrl,
-      workspace: input.workspace,
-      logFile,
-      webTools: {
-        enableWebSearch: input.enableWebSearch === true,
-        enableBrowser: true,
-        withWebSearchApiKey: Boolean(input.webSearchApiKey?.trim()),
-        browserProxyEnabled: input.browserProxyEnabled === true,
-        browserProxyUrl: input.browserProxyUrl ?? null,
-      },
-    });
-    fs.writeFileSync(path.join(stateDir, "openclaw.json"), configText, "utf8");
-
-    const env: Record<string, string> = {
-      OPENCLAW_SKIP_CHANNELS: "1",
-    };
-    if (meta.needsKey && input.apiKey.trim()) {
-      env[OPENCLAW_MODEL_KEY_ENV] = input.apiKey.trim();
-    }
-    if (input.webSearchApiKey?.trim()) {
-      env[OPENCLAW_BRAVE_KEY_ENV] = input.webSearchApiKey.trim();
-    }
-    const proxyUrl = input.browserProxyUrl?.trim() ?? "";
-    if (input.browserProxyEnabled === true && proxyUrl) {
-      // 与 browser.extraArgs 同源；覆盖父进程残留，供 web_fetch useTrustedEnvProxy 使用。
-      env.HTTP_PROXY = proxyUrl;
-      env.HTTPS_PROXY = proxyUrl;
-      env.http_proxy = proxyUrl;
-      env.https_proxy = proxyUrl;
-      // 模型 API 不得被本机死代理拖死（Clash 未开时常见）。
-      const noProxy =
-        "127.0.0.1,localhost,::1,.aliyuncs.com,dashscope.aliyuncs.com,.openai.com,api.openai.com";
-      env.NO_PROXY = noProxy;
-      env.no_proxy = noProxy;
-    } else {
-      // 显式清空，避免 ...process.env 继承系统/父进程代理。
-      env.HTTP_PROXY = "";
-      env.HTTPS_PROXY = "";
-      env.http_proxy = "";
-      env.https_proxy = "";
-      env.NO_PROXY = "";
-      env.no_proxy = "";
-    }
-    const managerOptions: GatewayRuntimeManagerOptions = {
-      openclawEntry: this.options.openclawEntry,
-      stateDir,
-      token: this.token,
-      port,
-      host: this.options.host ?? "127.0.0.1",
-      env,
-      startupTimeoutMs: this.options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
-    };
-    if (this.options.nodeBin) {
-      managerOptions.nodeBin = this.options.nodeBin;
-    }
-    if (this.options.logger) {
-      managerOptions.logger = this.options.logger;
-      managerOptions.onStdout = (line) =>
-        this.options.logger?.info(
-          { stream: "stdout", line: redactOpenClawRuntimeLine(line) },
-          "OpenClaw stdout",
-        );
-      managerOptions.onStderr = (line) =>
-        this.options.logger?.error(
-          { stream: "stderr", line: redactOpenClawRuntimeLine(line) },
-          "OpenClaw stderr",
-        );
-    }
+    await prepareRuntimeProvider(input, this.options, signal);
+    signal.throwIfAborted();
+    const prepared = await prepareGatewayLaunch(input, this.options);
+    signal.throwIfAborted();
+    this.token = prepared.token;
+    const managerOptions = prepared.managerOptions;
     managerOptions.onExit = (code, signal) => this.handleExit(code, signal);
     const manager = new GatewayRuntimeManager(managerOptions);
+    this.manager = manager;
+    const abort = (): void => { void manager.stop(); };
+    signal.addEventListener("abort", abort, { once: true });
     let started: Awaited<ReturnType<GatewayRuntimeManager["start"]>>;
     try {
       started = await manager.start();
+      signal.throwIfAborted();
     } catch (err) {
       await manager.stop().catch(() => undefined);
       this.manager = null;
@@ -327,6 +192,8 @@ export class GatewayRuntimeService {
         this.scheduleRestart(null, null);
       }
       throw err;
+    } finally {
+      signal.removeEventListener("abort", abort);
     }
     this.manager = manager;
 
@@ -335,6 +202,7 @@ export class GatewayRuntimeService {
       agentId: "main",
       defaultScopes: ["workspace.read"],
       authProvider: () => this.token,
+      allowAdminAbort: true,
     });
     const adapter = new OpenClawAdapter({
       runtime,
@@ -360,6 +228,8 @@ export class GatewayRuntimeService {
    */
   async stop(): Promise<void> {
     this.desiredRunning = false;
+    this.startAbort?.abort();
+    await this.startInFlight?.catch(() => undefined);
     if (this.restartTimer) {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
@@ -433,11 +303,5 @@ export class GatewayRuntimeService {
   }
 }
 
-/**
- * 生成随机本地 token。
- *
- * @returns hex token
- */
-function randomToken(): string {
-  return randomBytes(16).toString("hex");
-}
+import type { GatewayRuntimeHandle, GatewayRuntimeServiceOptions, StartGatewayRuntimeInput } from "./lifecycle/types.js";
+export type { GatewayRuntimeHandle, GatewayRuntimeServiceOptions, StartGatewayRuntimeInput } from "./lifecycle/types.js";

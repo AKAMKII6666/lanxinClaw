@@ -52,6 +52,18 @@ process.on("SIGTERM", () => { server.close(() => process.exit(0)); });
   return file;
 }
 
+test("stop 接管尚未就绪的启动，不能在 stop 返回后留下运行实例", async () => {
+  const service = new GatewayRuntimeService({ openclawEntry: writeFakeGateway(),
+    stateDir: fs.mkdtempSync(path.join(os.tmpdir(), "lanxin-gw-stop-start-")), startupTimeoutMs: 1000 });
+  const starting = service.ensureStarted({ provider: "openai", apiKey: "fixture", endpoint: null,
+    modelRef: "openai/test", workspace: "fixture" });
+  const rejected = assert.rejects(starting);
+  await service.stop();
+  await rejected;
+  assert.equal(service.isRunning(), false);
+  assert.equal(service.getHandle(), null);
+});
+
 test("ensureStarted：写 config（env ref 不含明文 key）、启动、幂等、停止", async () => {
   const entry = writeFakeGateway();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "lanxin-gw-state-"));

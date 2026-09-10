@@ -53,17 +53,16 @@ function createDeps(affair: AffairPayload, authenticated = true) {
 }
 
 describe("dispatchBridgeProtocolAction", () => {
-  it("affair.accept 发送 affair.close(status=closed)", () => {
+  it("通用出站器拒绝绕过共同事务协调器验收", () => {
     const { deps, sent } = createDeps(baseAffair());
     const result = dispatchBridgeProtocolAction(
-      { type: "affair.accept", affairId: "affair_bridge_001" },
+      { type: "affair.accept", affairId: "affair_bridge_001", expectedCurrentJobId: "job_bridge_001", acceptanceSummary: "用户确认结果" },
       deps,
     );
 
-    assert.equal(result.error, null);
-    assert.equal(result.delivery?.status, "sent_to_phone");
-    assert.equal(sent[0]?.type, "affair.close");
-    assert.equal((sent[0]?.payload as AffairPayload).status, "closed");
+    assert.equal(result.delivery?.reasonCode, "affair_action_required");
+    assert.equal(result.delivery?.status, "rejected");
+    assert.equal(sent.length, 0);
   });
 
   it("affair.requestRevision 先 resume，再附加继续处理 note", () => {
@@ -128,7 +127,7 @@ describe("dispatchBridgeProtocolAction", () => {
     assert.equal(deliveries[0]?.status, "sent_to_phone");
     assert.equal(deliveries[0]?.jobId, "job_bridge_001");
     assert.ok(deliveries[0]?.deliveredAt);
-    assert.equal(deps.pendingContext.list().length, 0);
+    assert.equal(deps.pendingContext.list().length, 1);
   });
 
   it("chat.attachContext(active_call) 有 session 时即使 hasActiveCall=false 也直发", () => {
@@ -147,6 +146,6 @@ describe("dispatchBridgeProtocolAction", () => {
     assert.equal(result.delivery?.status, "sent_to_phone");
     assert.equal(sent[0]?.type, "chat.context_attach");
     assert.equal((sent[0]?.payload as { target?: string }).target, "active_call");
-    assert.equal(deps.pendingContext.list().length, 0);
+    assert.equal(deps.pendingContext.list().length, 1);
   });
 });

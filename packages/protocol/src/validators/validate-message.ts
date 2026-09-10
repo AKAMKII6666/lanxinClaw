@@ -44,6 +44,9 @@ import {
 } from "./payloads/affair-job/affair-job.js";
 import type { ValidateResult } from "./result.js";
 
+import { validateAffairActionResult } from "./payloads/affair-job/action-result.js";
+import { validateAffairClosePayload } from "./payloads/affair-job/close.js";
+
 type PayloadValidator = (value: unknown) => ValidateResult<unknown>;
 
 const PAYLOAD_VALIDATORS: Record<MessageType, PayloadValidator> = {
@@ -61,7 +64,7 @@ const PAYLOAD_VALIDATORS: Record<MessageType, PayloadValidator> = {
   "affair.create": validateAffairPayload,
   "affair.update": validateAffairPayload,
   "affair.resume": validateAffairPayload,
-  "affair.close": validateAffairPayload,
+  "affair.close": (value) => validateAffairClosePayload(value).ok ? validateAffairClosePayload(value) : validateAffairActionResult(value),
   "job.create": validateJobPayload,
   "job.accepted": validateJobPayload,
   "job.progress": validateJobPayload,
@@ -140,7 +143,9 @@ export function validateMessage(value: unknown): ValidateResult<ProtocolEnvelope
   if (!envelope.ok) {
     return envelope;
   }
-  const payload = validatePayloadForType(envelope.value.type, envelope.value.payload);
+  const payload = envelope.value.type === "affair.close"
+    ? (envelope.value.source.kind === "phone" ? validateAffairClosePayload(envelope.value.payload) : validateAffairActionResult(envelope.value.payload))
+    : validatePayloadForType(envelope.value.type, envelope.value.payload);
   if (!payload.ok) {
     return payload;
   }

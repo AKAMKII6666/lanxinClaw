@@ -6,10 +6,11 @@
  * 副作用：仅内存。
  */
 
+import { cancelThroughCoordinator, createCancelDelegator } from "../fixtures/affair-cancel.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { PROTOCOL_VERSION, createEnvelope, type ProtocolEnvelope } from "@lanxin-claw/protocol";
-import { createCompanionBackendRuntime } from "../../src/backend/runtime.js";
+import { createCompanionBackendRuntime } from "../../../src/backend/runtime.js";
 
 describe("compound affair/job/permission state contract", () => {
   it("已取消 affair 下的 job.completed 被拒绝并记录错误，不污染父终态", () => {
@@ -42,22 +43,8 @@ describe("compound affair/job/permission state contract", () => {
         permissionRequestId: "perm_terminal_job",
       },
     })).ok, true);
-    assert.equal(backend.applyProtocolEnvelope(createEnvelope({
-      source: { kind: "phone", deviceId: "phone_terminal_job" },
-      target: { kind: "companion", deviceId: "desktop_terminal_job" },
-      type: "affair.close",
-      payload: {
-        affairId: "affair_terminal_job",
-        title: "已取消事务",
-        ownerAgent: "zhang-boss",
-        status: "canceled",
-        context: [],
-        acceptanceCriteria: ["不被污染"],
-        currentJobId: "job_terminal_job",
-        blockedReason: "用户取消",
-        resumeCondition: null,
-      },
-    })).ok, true);
+    // 模拟旧版已经落盘的父终态/子非终态组合，验证历史数据防污染。
+    backend.getState().affairs.set("affair_terminal_job", { ...backend.getState().affairs.get("affair_terminal_job")!, status: "canceled" });
 
     const completed = backend.applyProtocolEnvelope(createEnvelope({
       source: { kind: "companion", deviceId: "desktop_terminal_job" },
@@ -113,22 +100,8 @@ describe("compound affair/job/permission state contract", () => {
         progressSummary: "original",
       },
     })).ok, true);
-    assert.equal(backend.applyProtocolEnvelope(createEnvelope({
-      source: { kind: "phone", deviceId: "phone_terminal_replay" },
-      target: { kind: "companion", deviceId: "desktop_terminal_replay" },
-      type: "affair.close",
-      payload: {
-        affairId: "affair_terminal_replay",
-        title: "重放事务",
-        ownerAgent: "zhang-boss",
-        status: "canceled",
-        context: [],
-        acceptanceCriteria: [],
-        currentJobId: "job_terminal_replay",
-        blockedReason: "用户取消",
-        resumeCondition: null,
-      },
-    })).ok, true);
+    // 模拟旧版已经落盘的父终态/子非终态组合，验证历史数据防污染。
+    backend.getState().affairs.set("affair_terminal_replay", { ...backend.getState().affairs.get("affair_terminal_replay")!, status: "canceled" });
 
     const replay = backend.applyProtocolEnvelope(createEnvelope({
       source: { kind: "companion", deviceId: "desktop_terminal_replay" },
@@ -203,22 +176,7 @@ describe("compound affair/job/permission state contract", () => {
       requestedAt: new Date().toISOString(),
       expiresAt: null,
     }).ok, true);
-    assert.equal(backend.applyProtocolEnvelope(createEnvelope({
-      source: { kind: "phone", deviceId: "phone_perm_cancel" },
-      target: { kind: "companion", deviceId: "desktop_perm_cancel" },
-      type: "affair.close",
-      payload: {
-        affairId: "affair_perm_cancel",
-        title: "授权前取消",
-        ownerAgent: "zhang-boss",
-        status: "canceled",
-        context: [],
-        acceptanceCriteria: ["不要执行"],
-        currentJobId: "job_perm_cancel",
-        blockedReason: "用户取消",
-        resumeCondition: null,
-      },
-    })).ok, true);
+    assert.equal((await cancelThroughCoordinator(backend, "affair_perm_cancel")).ok, true);
 
     const allowed = await backend.applyBridgeAction({
       type: "permission.decide",
@@ -242,12 +200,13 @@ describe("compound affair/job/permission state contract", () => {
     backend = createCompanionBackendRuntime({
       desktopDeviceId: "desktop_cancel_compound",
       onBridgeAction: async (action, result) => {
-        const { runShellBridgeAction } = await import("../../src/shell/desktop/bridge-outbound.js");
+        const { runShellBridgeAction } = await import("../../../src/shell/desktop/bridge-outbound.js");
         await runShellBridgeAction(
           {
             desktopDeviceId: "desktop_cancel_compound",
             backend,
-            getDelegator: () => null,
+            getDelegator: () => createCancelDelegator(backend, sent),
+            sendEnvelope: (envelope) => { sent.push(envelope); },
             broadcast: (envelope) => {
               sent.push(envelope);
               return backend.applyProtocolEnvelope(envelope);

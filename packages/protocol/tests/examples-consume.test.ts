@@ -85,7 +85,7 @@ describe("@lanxin-claw/protocol examples consume", () => {
 
   it("拒绝非法 envelope", () => {
     const bad = validateMessage({
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
       messageId: "msg_bad",
       sentAt: "2026-07-22T00:00:00.000Z",
       source: { kind: "phone", deviceId: "p1" },

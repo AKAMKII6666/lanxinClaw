@@ -7,7 +7,7 @@
  */
 
 /** adapter 自身契约版本；须与协议 protocolVersion 对齐。 */
-export const ADAPTER_CONTRACT_VERSION = "0.1" as const;
+export const ADAPTER_CONTRACT_VERSION = "0.2" as const;
 
 /**
  * 返回 adapter 包标识。

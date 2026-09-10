@@ -11,20 +11,13 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type { RendererBridgeApi } from "../../bridge/renderer-api.js";
-import type { BridgeActionDelivery, ControlPanelSnapshotView } from "../../../bridge/contract.js";
+import type { BridgeUiAction, BridgeActionDelivery, ControlPanelSnapshotView } from "../../../bridge/contract.js";
 import { projectTaskWorkspaceFromSnapshot } from "./tasks-projection.js";
 import { TasksDetailPanel } from "./detail/tasks-detail.js";
 import { TasksListPanel } from "./tasks-list.js";
 import type { TaskWorkspaceView } from "./tasks-models.js";
 
-type TaskBridgeAction =
-  | { type: "affair.viewDetail"; affairId: string }
-  | { type: "affair.pause"; affairId: string }
-  | { type: "affair.resume"; affairId: string }
-  | { type: "affair.cancel"; affairId: string }
-  | { type: "affair.accept"; affairId: string }
-  | { type: "affair.requestRevision"; affairId: string }
-  | { type: "affair.requestAcceptance"; affairId: string };
+type TaskBridgeAction = Extract<BridgeUiAction, { affairId: string }>;
 
 function deliverySeverity(delivery: BridgeActionDelivery): "error" | "warning" | "info" {
   if (delivery.status === "rejected") {
@@ -190,7 +183,10 @@ export function TasksPage(props: { bridge: RendererBridgeApi }): ReactElement {
             onPause={(affairId) => model.submitAffairAction({ type: "affair.pause", affairId })}
             onResume={(affairId) => model.submitAffairAction({ type: "affair.resume", affairId })}
             onCancel={(affairId) => model.submitAffairAction({ type: "affair.cancel", affairId })}
-            onAccept={(affairId) => model.submitAffairAction({ type: "affair.accept", affairId })}
+            onAccept={(affairId) => model.submitAffairAction({ type: "affair.accept", affairId,
+              expectedCurrentJobId: model.detail?.currentJob?.jobId ?? "",
+              acceptanceSummary: `桌面用户确认验收：${model.detail?.currentJob?.progressSummary ?? ""}`,
+            })}
             onRequestRevision={(affairId) =>
               model.submitAffairAction({ type: "affair.requestRevision", affairId })
             }

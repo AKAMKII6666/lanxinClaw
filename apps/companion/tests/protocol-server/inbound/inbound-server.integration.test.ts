@@ -63,7 +63,7 @@ describe("protocol server inbound guards", () => {
     }
   });
 
-  it("needs_permission 阶段 job.cancel 本地闭环且不调 onJobCancel", { timeout: 5000 }, async () => {
+  it("needs_permission 取消也要求执行器核实，不凭权限态假造停止", { timeout: 5000 }, async () => {
     let cancelCalled = false;
     const { server, socket, backend, identityStore } = await startHarness({
       onJobCancel: async () => {
@@ -114,12 +114,10 @@ describe("protocol server inbound guards", () => {
         type: "job.cancel",
         payload: { jobId: "job_cancel_np", affairId: "affair_cancel_np" },
       })));
-      const canceled = await reader.nextEnvelope("job.canceled");
-      assert.equal((canceled.payload as { status?: string }).status, "canceled");
       const cancelAck = await reader.next("job.cancel ack");
-      assert.equal(cancelAck.ok, true);
-      assert.equal(backend.getState().jobs.get("job_cancel_np")?.status, "canceled");
-      assert.equal(cancelCalled, false);
+      assert.equal(cancelAck.ok, false);
+      assert.equal(backend.getState().jobs.get("job_cancel_np")?.status, "needs_permission");
+      assert.equal(cancelCalled, true);
       assert.equal(backend.listPendingPermissionCards().length, 0);
     } finally {
       socket.close();

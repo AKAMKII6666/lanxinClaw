@@ -21,7 +21,8 @@ export interface ElectronRuntime {
     whenReady(): Promise<void>;
     quit(): void;
     relaunch?(): void;
-    on(event: "window-all-closed", listener: () => void): void;
+    on(event: "window-all-closed" | "will-quit", listener: () => void): void;
+    on(event: "before-quit", listener: (event: { preventDefault(): void }) => void): void;
     /** 读取应用用户数据目录（可选；缺省回退内存/仓库目录） */
     getPath?(name: string): string;
     getAppPath?(): string;

@@ -13,23 +13,23 @@
  * 副作用：连接 Gateway WebSocket，发送 JSON RPC 帧。
  */
 
-import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
-import type { OpenClawRunContext, OpenClawRunSnapshot } from "../../runtime-client.js";
 import type { OpenClawGatewayCapabilities } from "../../../evidence/openclaw-execution-evidence.js";
+import type { OpenClawRunContext, OpenClawRunSnapshot } from "../../runtime-client.js";
 import {
-  GatewayTransportError,
-  type GatewayCreateRunRequest,
-  type GatewayTransport,
+canonicalizeGatewaySessionKey,
+DEFAULT_GATEWAY_AGENT_ID,
+} from "../session-key.js";
+import {
+GatewayTransportError,
+type GatewayCreateRunRequest,
+type GatewayTransport,
 } from "../transport.js";
 import { collectSupplementalEvidence } from "./evidence/probes.js";
 import { normalizeRunSnapshot } from "./evidence/snapshot.js";
+import { readAbortProof, requireStoppedRun } from "./evidence/cancel-proof.js";
 import { readString } from "./framing/readers.js";
 import { readCapabilities } from "./session/capabilities.js";
-import {
-  canonicalizeGatewaySessionKey,
-  DEFAULT_GATEWAY_AGENT_ID,
-} from "../session-key.js";
 
 /** Gateway 协议版本 */
 const PROTOCOL_VERSION = 4;
@@ -60,6 +60,8 @@ export interface RawWebSocketGatewayTransportOptions {
   timeoutMs?: number;
   /** agent.wait 单次等待毫秒；默认 3000 */
   getRunTimeoutMs?: number;
+  /** 仅自托管 Gateway owner 可显式开启；取消连接请求 admin 以停止旧连接持有的 run。 */
+  allowAdminAbort?: boolean;
 }
 
 /** raw WS transport 运行时上下文。 */
@@ -169,7 +171,8 @@ async function cancelGatewayRun(
   context?: OpenClawRunContext,
 ): Promise<OpenClawRunSnapshot> {
   const token = await requireToken(runtime.options);
-  const connection = await openGatewayConnection(runtime.options, token, runtime.timeoutMs);
+  const connection = await openGatewayConnection(runtime.options, token, runtime.timeoutMs,
+    runtime.options.allowAdminAbort === true);
   const { ws } = connection;
   try {
     const sessionKey = canonicalizeGatewaySessionKey(
@@ -177,17 +180,10 @@ async function cancelGatewayRun(
       DEFAULT_GATEWAY_AGENT_ID,
       context?.jobId,
     );
-    await rpc(ws, "chat.abort", { ...(sessionKey ? { sessionKey } : {}), runId }, runtime.timeoutMs);
-    return normalizeRunSnapshot(
-      { runId, status: "cancelled", summary: "cancelled_by_adapter" },
-      "cancelRun",
-      {
-        ...(context ? { context } : {}),
-        capabilities: connection.capabilities,
-        sessionKey,
-        localCancelAck: true,
-      },
-    );
+    const ack = await rpc(ws, "chat.abort", { ...(sessionKey ? { sessionKey } : {}), runId }, runtime.timeoutMs);
+    readAbortProof(ack, runId);
+    // abort 响应只证明取消已受理；等待同一 run 的退出，不能提前提交父终态。
+    return requireStoppedRun(await getGatewayRun(runtime, runId, context), runId);
   } finally {
     ws.close();
   }
@@ -232,7 +228,11 @@ async function openGatewayConnection(
   options: RawWebSocketGatewayTransportOptions,
   token: string,
   timeoutMs: number,
+  adminAbort = false,
 ): Promise<{ ws: WebSocket; capabilities: OpenClawGatewayCapabilities }> {
+  if (adminAbort && !["127.0.0.1", "localhost", "[::1]"].includes(new URL(options.gatewayUrl).hostname)) {
+    throw new GatewayTransportError("gateway_admin_abort_requires_loopback", "自托管取消控制面必须使用 loopback Gateway", false);
+  }
   const ws = new WebSocket(options.gatewayUrl);
   // 常驻消息队列：ws 在 open 事件前到达的消息没有监听者会丢失，
   // 因此先挂队列收集，open 后再按需取用。
@@ -256,7 +256,7 @@ async function openGatewayConnection(
         minProtocol: PROTOCOL_VERSION,
         maxProtocol: PROTOCOL_VERSION,
         role: "operator",
-        scopes: [...GATEWAY_OPERATOR_CONNECT_SCOPES],
+        scopes: [...GATEWAY_OPERATOR_CONNECT_SCOPES, ...(adminAbort ? ["operator.admin"] : [])],
         caps: ["tool-events"],
         client: {
           id: GATEWAY_CLIENT_ID,
@@ -284,199 +284,6 @@ async function openGatewayConnection(
 }
 
 /**
- * 等待 socket open。
- *
- * @param ws socket
- * @param timeoutMs 超时
- * @returns 完成
- */
-function waitSocketOpen(ws: WebSocket, timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new GatewayTransportError("gateway_connect_timeout", "Gateway 连接超时", true));
-    }, timeoutMs);
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      ws.off("open", onOpen);
-      ws.off("error", onError);
-    };
-    const onOpen = (): void => {
-      cleanup();
-      resolve();
-    };
-    const onError = (err: Error): void => {
-      cleanup();
-      reject(new GatewayTransportError("gateway_connect_failed", err.message, true));
-    };
-    ws.once("open", onOpen);
-    ws.once("error", onError);
-  });
-}
-
-/**
- * 从队列或后续消息中取匹配帧。
- *
- * @param ws socket
- * @param queue 常驻消息队列
- * @param predicate 匹配条件
- * @param timeoutMs 超时
- * @param label 描述
- * @returns 匹配帧
- */
-function takeGatewayEvent(
-  ws: WebSocket,
-  queue: Array<Record<string, unknown>>,
-  predicate: (frame: Record<string, unknown>) => boolean,
-  timeoutMs: number,
-  label: string,
-): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let timer: NodeJS.Timeout | undefined;
-    let onMessage: (data: WebSocket.RawData) => void = () => undefined;
-    let onError: (err: Error) => void = () => undefined;
-    let onClose: () => void = () => undefined;
-    const cleanup = (): void => {
-      if (timer) {
-        clearTimeout(timer);
-      }
-      ws.off("message", onMessage);
-      ws.off("error", onError);
-      ws.off("close", onClose);
-    };
-    const check = (): boolean => {
-      const index = queue.findIndex(predicate);
-      if (index >= 0) {
-        const frame = queue.splice(index, 1)[0];
-        if (frame) {
-          cleanup();
-          resolve(frame);
-          return true;
-        }
-      }
-      return false;
-    };
-    if (check()) {
-      return;
-    }
-    timer = setTimeout(() => {
-      cleanup();
-      reject(new GatewayTransportError("gateway_event_timeout", `等待事件 ${label} 超时`, true));
-    }, timeoutMs);
-    onMessage = (data: WebSocket.RawData): void => {
-      queue.push(parseFrame(data));
-      check();
-    };
-    onError = (err: Error): void => {
-      cleanup();
-      reject(new GatewayTransportError("gateway_socket_error", err.message, true));
-    };
-    onClose = (): void => {
-      cleanup();
-      reject(new GatewayTransportError("gateway_socket_closed", "Gateway 连接提前关闭", true));
-    };
-    ws.on("message", onMessage);
-    ws.once("error", onError);
-    ws.once("close", onClose);
-  });
-}
-
-/**
- * 发送 req 并等待 res。
- *
- * @param ws socket
- * @param method 方法名
- * @param params 参数
- * @param timeoutMs 超时
- * @returns 响应 payload
- */
-async function rpc(
-  ws: WebSocket,
-  method: string,
-  params: Record<string, unknown>,
-  timeoutMs: number,
-): Promise<Record<string, unknown>> {
-  const id = `gw_${randomUUID()}`;
-  ws.send(JSON.stringify({ type: "req", id, method, params }));
-  return await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new GatewayTransportError("gateway_timeout", `Gateway RPC 超时: ${method}`, true));
-    }, timeoutMs);
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      ws.off("message", onMessage);
-      ws.off("error", onError);
-      ws.off("close", onClose);
-    };
-    const onMessage = (data: WebSocket.RawData): void => {
-      const frame = parseFrame(data);
-      if (frame.type !== "res" || frame.id !== id) {
-        return;
-      }
-      cleanup();
-      if (frame.ok === false) {
-        reject(errorFromFrame(frame));
-        return;
-      }
-      const payload = frame.payload;
-      resolve(
-        payload && typeof payload === "object"
-          ? (payload as Record<string, unknown>)
-          : {},
-      );
-    };
-    const onError = (err: Error): void => {
-      cleanup();
-      reject(new GatewayTransportError("gateway_socket_error", err.message, true));
-    };
-    const onClose = (): void => {
-      cleanup();
-      reject(new GatewayTransportError("gateway_socket_closed", "Gateway 连接提前关闭", true));
-    };
-    ws.on("message", onMessage);
-    ws.once("error", onError);
-    ws.once("close", onClose);
-  });
-}
-
-/**
- * 解析 Gateway 帧。
- *
- * @param data 原始数据
- * @returns 帧
- */
-function parseFrame(data: WebSocket.RawData): Record<string, unknown> {
-  try {
-    const value = JSON.parse(data.toString()) as unknown;
-    return value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * 从错误帧构造错误。
- *
- * @param frame 响应帧
- * @returns 错误
- */
-function errorFromFrame(frame: Record<string, unknown>): GatewayTransportError {
-  const error = frame.error;
-  if (error && typeof error === "object") {
-    const typed = error as { code?: unknown; message?: unknown; retryable?: unknown };
-    return new GatewayTransportError(
-      typeof typed.code === "string" ? typed.code : "gateway_rpc_failed",
-      typeof typed.message === "string" ? typed.message : "Gateway RPC 失败",
-      typeof typed.retryable === "boolean" ? typed.retryable : false,
-    );
-  }
-  return new GatewayTransportError("gateway_rpc_failed", "Gateway RPC 失败", false);
-}
-
-/**
  * 判断 connect 响应是否为 hello-ok。
  *
  * @param payload 响应载荷
@@ -489,3 +296,7 @@ function isHelloOk(payload: Record<string, unknown>): boolean {
   }
   return Boolean(readString(payload, ["connId"]) || readString(payload, ["server"]));
 }
+
+import { parseFrame, rpc } from "./framing/rpc.js";
+
+import { takeGatewayEvent, waitSocketOpen } from "./session/waiters.js";

@@ -12,7 +12,7 @@ import { createProtocolLogDto } from "../../src/protocol-server/protocol-log-dto
 describe("protocol log dto", () => {
   it("redacts secret-like text values even when the field name is harmless", () => {
     const dto = createProtocolLogDto({
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
       messageId: "msg_dto_001",
       correlationId: "corr_dto_001",
       sentAt: "2026-08-30T16:39:43.000Z",

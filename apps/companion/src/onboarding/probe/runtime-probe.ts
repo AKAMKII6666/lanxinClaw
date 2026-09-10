@@ -7,6 +7,7 @@ import {
   OpenClawAdapter,
 } from "@lanxin-claw/openclaw-adapter";
 import type { ProbeResult } from "../types.js";
+import { RUNTIME_PROBE_MARKER, waitForRuntimeProbeResult } from "./runtime-result.js";
 
 /** 探针选项 */
 export interface RuntimeReadyProbeOptions {
@@ -18,6 +19,8 @@ export interface RuntimeReadyProbeOptions {
   agentId?: string;
   /** 单次 wait 超时毫秒；默认 15000 */
   getRunTimeoutMs?: number;
+  /** 等待模型终态的总时限；默认 60000 */
+  resultTimeoutMs?: number;
 }
 
 /**
@@ -43,23 +46,16 @@ export function createGatewayRuntimeReadyProbe(
     const created = await adapter.createJob({
       jobId: probeJobId,
       affairId: "onboarding-probe",
-      goal: "lanxin-onboarding-probe: reply ok",
+      goal: `模型连接验收探针：不要调用工具或读取文件，只回复 ${RUNTIME_PROBE_MARKER}`,
       allowedPermissions: ["workspace.read"],
     });
     if (!created.ok) {
       return { ok: false, code: created.code, message: created.message };
     }
-    const read = await adapter.readJob(probeJobId, { refresh: true });
-    if (!read.ok) {
-      return { ok: false, code: read.code, message: read.message };
-    }
-    if (read.job.status === "failed" || read.job.status === "canceled") {
-      return {
-        ok: false,
-        code: "runtime_probe_failed",
-        message: read.job.blockedReason ?? "探针 run 未成功（检查模型 key/额度/网络）",
-      };
-    }
-    return { ok: true };
+    const result = await waitForRuntimeProbeResult(
+      () => adapter.readJob(probeJobId, { refresh: true }), options.resultTimeoutMs,
+    );
+    if (!result.ok) await adapter.cancelJob(probeJobId).catch(() => undefined);
+    return result;
   };
 }

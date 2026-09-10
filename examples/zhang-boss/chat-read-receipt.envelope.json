@@ -1,5 +1,5 @@
 {
-  "protocolVersion": "0.1",
+  "protocolVersion": "0.2",
   "messageId": "msg_chat_read_receipt_001",
   "correlationId": "msg_chat_message_001",
   "sentAt": "2026-07-23T01:04:00.000Z",

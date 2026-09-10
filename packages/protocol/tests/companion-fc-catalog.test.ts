@@ -14,7 +14,7 @@ import {
 
 describe("companion FC catalog", () => {
   it("导出稳定 FC 名且与 catalog 一一对应", () => {
-    assert.equal(COMPANION_FC_NAMES.length, 15);
+    assert.equal(COMPANION_FC_NAMES.length, 16);
     assert.equal(COMPANION_FC_CATALOG.length, COMPANION_FC_NAMES.length);
     for (const name of COMPANION_FC_NAMES) {
       assert.equal(isCompanionFcName(name), true);
@@ -24,11 +24,12 @@ describe("companion FC catalog", () => {
     }
   });
 
-  it("emits 仅含已知 message type；查询类为空", () => {
+  it("emits 仅含已知 type；查询无需 session，消费后可异步补回执", () => {
     const localOnly = COMPANION_FC_CATALOG.filter((item) => item.localOnly);
     assert.deepEqual(
       localOnly.map((item) => item.name).sort(),
       [
+        "companion.bind_message",
         "companion.discover_desktops",
         "companion.fetch_pending_context",
         "companion.get_connection_status",
@@ -40,7 +41,9 @@ describe("companion FC catalog", () => {
       for (const type of item.emits) {
         assert.equal(isMessageType(type), true, `非法 emit: ${type}`);
       }
-      if (item.localOnly) {
+      if (item.name === "companion.fetch_pending_context") {
+        assert.deepEqual(item.emits, ["chat.read_receipt"]);
+      } else if (item.localOnly) {
         assert.equal(item.emits.length, 0);
       }
     }

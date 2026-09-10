@@ -21,6 +21,7 @@ export function canExecutePermissionGrantedJob(
   affairId: string,
   jobId: string,
 ): boolean {
+  if (deps.isAffairClosing?.(affairId)) return false;
   if (!affairId || !deps.getAffair) {
     return true;
   }
@@ -33,7 +34,7 @@ export function canExecutePermissionGrantedJob(
     deps.logger?.warn({ affairId, jobId, status: affair.status }, "父事务已终态，拒绝委派");
     return false;
   }
-  if (affair.currentJobId !== jobId) {
+  if (deps.getJobPurpose?.(jobId) !== "exploration" && affair.currentJobId !== jobId) {
     deps.logger?.warn(
       { affairId, jobId, currentJobId: affair.currentJobId },
       "权限请求不属于当前 job，拒绝委派",

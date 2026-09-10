@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/affair-action-result.schema.json",
+  "title": "Committed affair close result",
+  "type": "object",
+  "required": [
+    "affair",
+    "jobs"
+  ],
+  "properties": {
+    "affair": {
+      "allOf": [
+        {
+          "$ref": "affair.schema.json"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "closed",
+                "canceled"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "job.schema.json"
+          },
+          {
+            "properties": {
+              "status": {
+                "enum": [
+                  "completed",
+                  "failed",
+                  "canceled"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

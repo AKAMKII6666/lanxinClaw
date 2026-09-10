@@ -7,30 +7,30 @@
  */
 
 import type {
-  OpenClawEvidenceKind,
-  OpenClawExecutionEvidence,
-  OpenClawToolFinding,
+OpenClawEvidenceKind,
+OpenClawExecutionEvidence,
+OpenClawToolFinding,
 } from "../../evidence/openclaw-execution-evidence.js";
-import type { OpenClawRunStatus } from "../../status/openclaw-run-status.js";
 import { isLowSignalText, pickMeaningfulBusinessText } from "./business/business-evidence.js";
 import { safeText } from "./business/safe-text.js";
 
 export {
-  classifyBusinessEvidence,
-  classifyTextBusinessSignal,
-  hasBusinessEntitySignal,
-  isLowSignalText,
-  isMeaningfulCompletionText,
-  isUsableProgressText,
-  pickMeaningfulBusinessText,
+classifyBusinessEvidence,
+classifyTextBusinessSignal,
+hasBusinessEntitySignal,
+isLowSignalText,
+isMeaningfulCompletionText,
+isUsableProgressText,
+pickMeaningfulBusinessText
 } from "./business/business-evidence.js";
 export type {
-  BusinessEvidenceClassification,
-  BusinessEvidenceKind,
-  BusinessEvidenceQuality,
-  ClassifyBusinessEvidenceOptions,
+BusinessEvidenceClassification,
+BusinessEvidenceKind,
+BusinessEvidenceQuality,
+ClassifyBusinessEvidenceOptions
 } from "./business/business-evidence.js";
 export { safeText } from "./business/safe-text.js";
+export { hasTerminalLifecycle, normalizeEvidenceRunStatus } from "./status/run.js";
 
 /** task ledger 的粗分类。 */
 export type TaskOutcome = "running" | "blocked" | "failed" | "completed" | null;
@@ -42,60 +42,6 @@ const BLOCKING_TEXT_PATTERN =
 /** 失败/未完成的最终回复线索。 */
 const NEGATIVE_FINAL_REPLY_PATTERN =
   /(cannot complete|can't complete|unable to complete|could not complete|not completed|failed to|blocked by|policy (blocked|block|restriction|restricted|denied|forbidden|not allowed)|permission (required|needed|denied|missing|blocked|not granted)|requires (user )?(permission|approval)|needs (user )?(permission|approval)|without permission|no permission|disabled|no provider|unavailable|not configured|无法完成|无法|不能|没能完成|没有完成|执行失败|受限|策略限制|被阻止|不可用|未配置|需要你|需要用户|没有权限|缺少权限)/i;
-
-/**
- * 归一化 evidence 中的 OpenClaw run 状态。
- *
- * @param evidence OpenClaw 观测证据
- * @returns 规范状态；证据不足时返回 null
- */
-export function normalizeEvidenceRunStatus(evidence: OpenClawExecutionEvidence): OpenClawRunStatus | null {
-  const candidates = [
-    evidence.wait?.status,
-    evidence.task?.terminalOutcome,
-    evidence.task?.status,
-    ...(evidence.sourceStatuses ?? []),
-  ];
-  for (const value of candidates) {
-    const normalized = normalizeRunStatus(value);
-    if (normalized) {
-      return normalized;
-    }
-  }
-  return null;
-}
-
-function normalizeRunStatus(value: string | undefined): OpenClawRunStatus | null {
-  const lower = value?.trim().toLowerCase();
-  if (!lower) {
-    return null;
-  }
-  if (["accepted", "queued", "created", "pending", "in_flight"].includes(lower)) {
-    return "accepted";
-  }
-  if (["running", "in_progress", "active", "working"].includes(lower)) {
-    return "running";
-  }
-  if (["approval_required", "approval.request", "waiting_approval", "needs_permission"].includes(lower)) {
-    return "waiting_approval";
-  }
-  if (["blocked", "requires_user", "need_user", "requires_input"].includes(lower)) {
-    return "blocked";
-  }
-  if (["completed", "complete", "done", "success", "succeeded"].includes(lower)) {
-    return "completed";
-  }
-  if (["failed", "failure", "error", "errored"].includes(lower)) {
-    return "failed";
-  }
-  if (["cancelled", "canceled", "aborted", "abort"].includes(lower)) {
-    return "cancelled";
-  }
-  if (["timed_out", "terminal_timeout"].includes(lower)) {
-    return "timed_out";
-  }
-  return null;
-}
 
 /**
  * 判断 tool/task 证据是否显示取消。
@@ -297,25 +243,6 @@ export function classifyTask(evidence: OpenClawExecutionEvidence): TaskOutcome {
 }
 
 /**
- * 判断 evidence 是否携带终态 lifecycle。
- *
- * @param evidence OpenClaw 观测证据
- * @returns 是否存在 run 终态证据
- */
-export function hasTerminalLifecycle(evidence: OpenClawExecutionEvidence): boolean {
-  const status = normalizeEvidenceRunStatus(evidence);
-  return Boolean(
-    evidence.lifecycle?.endedAt ||
-      evidence.lifecycle?.terminalPhase ||
-      evidence.wait?.endedAt ||
-      status === "completed" ||
-      status === "failed" ||
-      status === "timed_out" ||
-      status === "cancelled",
-  );
-}
-
-/**
  * 判断 wait ok 是否同时有终态证据支撑。
  *
  * @param evidence OpenClaw 观测证据
@@ -429,3 +356,5 @@ export function summaryFromEvidence(evidence: OpenClawExecutionEvidence, fallbac
   }
   return "OpenClaw 正在执行";
 }
+
+import { hasTerminalLifecycle } from "./status/run.js";

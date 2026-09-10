@@ -6,91 +6,22 @@
  * 副作用：监听本机随机端口。
  */
 
+import {
+PROTOCOL_VERSION,
+createEnvelope,
+} from "@lanxin-claw/protocol";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import WebSocket from "ws";
-import type { Logger } from "pino";
-import {
-  PROTOCOL_VERSION,
-  createEnvelope,
-} from "@lanxin-claw/protocol";
 import { createSessionAuthProof } from "../../src/credentials/auth-proof.js";
 import {
-  createJsonReader,
-  openSession,
-  startHarness,
-  waitFor,
+createJsonReader,
+openSession,
+startHarness,
+waitFor,
 } from "./harness.js";
 
-function createCaptureLogger(): {
-  logger: Logger;
-  entries: Array<{ level: string; meta: Record<string, unknown>; message: string }>;
-} {
-  const entries: Array<{ level: string; meta: Record<string, unknown>; message: string }> = [];
-  const push = (level: string, meta: Record<string, unknown>, message: string): void => {
-    entries.push({ level, meta, message });
-  };
-  return {
-    entries,
-    logger: {
-      info: (meta: Record<string, unknown>, message: string) => push("info", meta, message),
-      warn: (meta: Record<string, unknown>, message: string) => push("warn", meta, message),
-      error: (meta: Record<string, unknown>, message: string) => push("error", meta, message),
-    } as unknown as Logger,
-  };
-}
-
 describe("companion protocol server", () => {
-  it("session.open 入站日志落 redacted DTO", { timeout: 5000 }, async () => {
-    const captured = createCaptureLogger();
-    const { server, socket, identityStore } = await startHarness({ logger: captured.logger });
-    const reader = createJsonReader(socket);
-    try {
-      const identity = await identityStore.savePairedIdentity({
-        pairingId: "pair_log_001",
-        phoneDeviceId: "phone_log_001",
-        phoneDisplayName: "phone",
-        desktopDeviceId: "desktop_srv_001",
-        desktopDisplayName: "desktop",
-        pairedAt: new Date().toISOString(),
-      });
-      const sessionId = "sess_log_001";
-      socket.send(JSON.stringify(createEnvelope({
-        source: { kind: "phone", deviceId: "phone_log_001" },
-        target: { kind: "companion", deviceId: "desktop_srv_001" },
-        type: "session.open",
-        payload: {
-          sessionId,
-          phoneDeviceId: "phone_log_001",
-          desktopDeviceId: "desktop_srv_001",
-          authProof: createSessionAuthProof(identity.pairingSecret ?? "", sessionId),
-          protocolVersion: PROTOCOL_VERSION,
-        },
-      })));
-      await reader.nextEnvelope("session.accepted");
-      await waitFor(() =>
-        captured.entries.some((entry) => {
-          const meta = entry.meta as {
-            event?: string;
-            dto?: { type?: string; payload?: { authProof?: string } };
-          };
-          return meta.event === "protocol.inbound.dto" && meta.dto?.type === "session.open";
-        }),
-      );
-      const inbound = captured.entries.find((entry) => {
-        const meta = entry.meta as {
-          event?: string;
-          dto?: { type?: string; payload?: { authProof?: string } };
-        };
-        return meta.event === "protocol.inbound.dto" && meta.dto?.type === "session.open";
-      });
-      const dto = inbound?.meta.dto as { payload?: { authProof?: string } } | undefined;
-      assert.equal(dto?.payload?.authProof, "[redacted]");
-    } finally {
-      socket.close();
-      await server.close();
-    }
-  });
 
   it("空 allowedPermissions 被拒绝且不入队", { timeout: 5000 }, async () => {
     const { server, socket, backend, identityStore } = await startHarness();
@@ -210,7 +141,7 @@ describe("companion protocol server", () => {
     }
   });
 
-  it("job.cancel 触发 onJobCancel 并 ack", { timeout: 5000 }, async () => {
+  it("job.cancel handler 未提交停止证据时拒绝成功回执", { timeout: 5000 }, async () => {
     const cancelled: Array<{ jobId: string; affairId: string }> = [];
     const { server, socket, backend, identityStore } = await startHarness({
       onJobCancel: async (input) => {
@@ -240,7 +171,8 @@ describe("companion protocol server", () => {
         payload: { jobId: "job_cancel_001", affairId: "affair_cancel_001" },
       })));
       const msg = await reader.next("job.cancel ack");
-      assert.equal(msg.ok, true);
+      assert.equal(msg.ok, false);
+      assert.equal(backend.getState().jobs.get("job_cancel_001")?.status, "running");
       assert.equal(cancelled.length, 1);
       assert.equal(cancelled[0]?.jobId, "job_cancel_001");
     } finally {
@@ -249,7 +181,7 @@ describe("companion protocol server", () => {
     }
   });
 
-  it("job.cancel 无 onJobCancel 时状态闭环（广播 canceled）", { timeout: 5000 }, async () => {
+  it("job.cancel 无 onJobCancel 时拒绝假取消", { timeout: 5000 }, async () => {
     const { server, socket, backend, identityStore } = await startHarness();
     const reader = createJsonReader(socket);
     try {
@@ -273,144 +205,9 @@ describe("companion protocol server", () => {
         type: "job.cancel",
         payload: { jobId: "job_cancel_002", affairId: "affair_cancel_002" },
       })));
-      const canceled = await reader.nextEnvelope("job.canceled");
-      assert.equal((canceled.payload as { status?: string }).status, "canceled");
-      let cancelAck: { ok?: boolean } | undefined;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const msg = await reader.next("job.cancel ack");
-        if (typeof msg.ok === "boolean") {
-          cancelAck = msg;
-          break;
-        }
-      }
-      assert.equal(cancelAck?.ok, true);
-      assert.equal(backend.getState().jobs.get("job_cancel_002")?.status, "canceled");
-    } finally {
-      socket.close();
-      await server.close();
-    }
-  });
-
-  it("心跳超时标记失联、广播 session.closed、业务被拒、重连恢复", { timeout: 8000 }, async () => {
-    const { server, socket, backend, identityStore } = await startHarness({
-      heartbeatIntervalMs: 50,
-      missedHeartbeats: 2,
-    });
-    const reader = createJsonReader(socket);
-    try {
-      backend.getState().connection.sessionAuthenticated = true;
-      backend.getState().connection.sessionId = "sess_hb_001";
-      backend.getState().connection.phoneDeviceId = "phone_hb_001";
-      backend.getState().connection.lastSeenAt = new Date(Date.now() - 5_000).toISOString();
-
-      await waitFor(() => !backend.getState().connection.sessionAuthenticated);
-      assert.equal(backend.getState().lastError?.code, "connection_lost");
-      const closed = await reader.nextEnvelope("session.closed");
-      assert.equal((closed.payload as { reason?: string }).reason, "heartbeat_timeout");
-
-      socket.send(JSON.stringify(createEnvelope({
-        source: { kind: "phone", deviceId: "phone_hb_001" },
-        target: { kind: "companion", deviceId: "desktop_srv_001" },
-        type: "affair.create",
-        payload: {
-          affairId: "affair_hb_001",
-          title: "心跳超时后业务",
-          ownerAgent: "zhang-boss",
-          status: "ready",
-          context: [],
-          acceptanceCriteria: [],
-          blockedReason: null,
-          resumeCondition: null,
-          currentJobId: null,
-        },
-      })));
-      const rejected = await reader.next("session required");
-      assert.equal(rejected.error.code, "session_required");
-
-      await identityStore.savePairedIdentity({
-        pairingId: "pair_hb_001",
-        phoneDeviceId: "phone_hb_001",
-        phoneDisplayName: "heartbeat phone",
-        desktopDeviceId: "desktop_srv_001",
-        desktopDisplayName: "desktop",
-        pairedAt: new Date().toISOString(),
-      });
-      const identity = await identityStore.findIdentity("phone_hb_001", "desktop_srv_001");
-      assert.ok(identity?.pairingSecret);
-      const sessionId = "sess_hb_002";
-      socket.send(JSON.stringify(createEnvelope({
-        source: { kind: "phone", deviceId: "phone_hb_001" },
-        target: { kind: "companion", deviceId: "desktop_srv_001" },
-        type: "session.open",
-        payload: {
-          sessionId,
-          phoneDeviceId: "phone_hb_001",
-          desktopDeviceId: "desktop_srv_001",
-          authProof: createSessionAuthProof(identity.pairingSecret ?? "", sessionId),
-          protocolVersion: PROTOCOL_VERSION,
-        },
-      })));
-      assert.equal((await reader.nextEnvelope("session.accepted")).type, "session.accepted");
-      assert.equal(backend.getState().connection.sessionAuthenticated, true);
-    } finally {
-      socket.close();
-      await server.close();
-    }
-  });
-
-  it("认证 socket 关闭后立即标记 session 失联", { timeout: 5000 }, async () => {
-    const { server, socket, backend, identityStore } = await startHarness();
-    const reader = createJsonReader(socket);
-    try {
-      await openSession(socket, reader, identityStore);
-      assert.equal(backend.getState().connection.sessionAuthenticated, true);
-
-      socket.close();
-      await waitFor(() => !backend.getState().connection.sessionAuthenticated);
-
-      assert.equal(backend.getState().lastError?.code, "connection_lost");
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("未 session 时业务消息被拒且不写状态", { timeout: 5000 }, async () => {
-    const { server, socket, backend } = await startHarness();
-    const reader = createJsonReader(socket);
-    try {
-      socket.send(JSON.stringify(createEnvelope({
-        source: { kind: "phone", deviceId: "phone_no_session_001" },
-        target: { kind: "companion", deviceId: "desktop_srv_001" },
-        type: "affair.create",
-        payload: {
-          affairId: "affair_no_session_001",
-          title: "未认证业务",
-          ownerAgent: "zhang-boss",
-          status: "ready",
-          context: [],
-          acceptanceCriteria: [],
-          blockedReason: null,
-          resumeCondition: null,
-          currentJobId: null,
-        },
-      })));
-      const msg = await reader.next("session required");
-      assert.equal(msg.ok, false);
-      assert.equal(msg.error.code, "session_required");
-      assert.equal(backend.getState().affairs.has("affair_no_session_001"), false);
-    } finally {
-      socket.close();
-      await server.close();
-    }
-  });
-
-  it("拒绝非法 envelope", { timeout: 5000 }, async () => {
-    const { server, socket } = await startHarness();
-    const reader = createJsonReader(socket);
-    try {
-      socket.send(JSON.stringify({ type: "unknown" }));
-      const msg = await reader.next("invalid envelope");
-      assert.equal(msg.ok, false);
+      const reply = await reader.next("job.cancel ack");
+      assert.equal(reply.ok, false);
+      assert.equal(backend.getState().jobs.get("job_cancel_002")?.status, "queued");
     } finally {
       socket.close();
       await server.close();
@@ -602,6 +399,9 @@ describe("companion protocol server", () => {
     const reader = createJsonReader(socket);
     try {
       await openSession(socket, reader, identityStore);
+      backend.getPendingContext().enqueue({ sourceId: "chat_srv_001", sourceKind: "message",
+        phoneDeviceId: "phone_srv_001", desktopDeviceId: "desktop_srv_001", text: "原消息",
+        target: "active_call", contentKind: "note", affairId: null });
       socket.send(JSON.stringify(createEnvelope({
         source: { kind: "phone", deviceId: "phone_srv_001" },
         target: { kind: "companion", deviceId: "desktop_srv_001" },
@@ -623,3 +423,5 @@ describe("companion protocol server", () => {
     }
   });
 });
+
+import { createCaptureLogger } from "./support/capture-logger.js";

@@ -6,87 +6,40 @@
  * 纯函数：不修改入参。
  */
 
-import type { JobEvidenceQuality, JobRecentStep, JobStatus } from "@lanxin-claw/protocol";
 import type {
-  OpenClawEvidenceKind,
-  OpenClawEvidenceStrength,
-  OpenClawExecutionEvidence,
+OpenClawExecutionEvidence
 } from "../evidence/openclaw-execution-evidence.js";
 import type { AdapterJobRecord } from "../jobs/job-types.js";
-import type { OpenClawRunStatus } from "../status/openclaw-run-status.js";
 import {
-  blockingFindingKind,
-  classifyBusinessEvidence,
-  classifyTask,
-  containsBlockingText,
-  firstBlockingFinding,
-  hasCancelledFinding,
-  hasNegativeFinalReply,
-  hasTerminalLifecycle,
-  isLifecycleError,
-  isLowSignalText,
-  isTerminalTimeout,
-  isWaitError,
-  isWaitOkWithTerminalEvidence,
-  isWaitOnlyTimeout,
-  normalizeEvidenceRunStatus,
-  pickMeaningfulBusinessText,
-  resumeConditionFromEvidence,
-  safeText,
-  summaryFromEvidence,
-  type TaskOutcome,
+hasBusinessCompletionEvidence,
+hasMeaningfulTaskCompletion,
+hasNegativeToolFinding,
+isTerminalWithoutBusinessResult,
+} from "./decision/completion-gate.js";
+import {
+blockingFindingKind,
+classifyBusinessEvidence,
+classifyTask,
+containsBlockingText,
+firstBlockingFinding,
+hasCancelledFinding,
+hasNegativeFinalReply,
+hasTerminalLifecycle,
+isLifecycleError,
+isTerminalTimeout,
+isWaitError,
+isWaitOkWithTerminalEvidence,
+isWaitOnlyTimeout,
+normalizeEvidenceRunStatus,
+pickMeaningfulBusinessText,
+resumeConditionFromEvidence,
+safeText,
+summaryFromEvidence
 } from "./decision/evidence-helpers.js";
 import {
-  hasBusinessCompletionEvidence,
-  hasMeaningfulTaskCompletion,
-  hasNegativeToolFinding,
-  isTerminalWithoutBusinessResult,
-} from "./decision/completion-gate.js";
-import { buildSuperviseProjection } from "./decision/supervise-projection.js";
-import {
-  evaluateFailedFindingRule,
-  evaluateSoftWebSearchTerminalRule,
+evaluateFailedFindingRule,
+evaluateSoftWebSearchTerminalRule,
 } from "./decision/web-research-rules.js";
-
-/** Lanxin 终态门闩。 */
-const TERMINAL_JOB_STATUSES = new Set<JobStatus>(["completed", "failed", "canceled"]);
-
-/** 裁决结果；只进入 adapter store，公开协议只投影安全字段。 */
-export interface OpenClawToLanxinJobDecision {
-  /** Lanxin job 状态。 */
-  status: JobStatus;
-  /** 用户可见进度或终态摘要。 */
-  progressSummary: string;
-  /** 用户可见阻塞原因；非阻塞可为 null。 */
-  blockedReason: string | null;
-  /** 用户可恢复条件；不可恢复或无需恢复可为 null。 */
-  resumeCondition: string | null;
-  /** 稳定理由码；供 companion/phone 精准回报。 */
-  statusReasonCode: string;
-  /** 证据观测时间 ISO-8601。 */
-  statusObservedAt: string;
-  /** 触发裁决的主要证据类别。 */
-  evidenceKind: OpenClawEvidenceKind;
-  /** 触发裁决的主要证据强度。 */
-  evidenceStrength: OpenClawEvidenceStrength;
-  /** OpenClaw 原始归一化状态；未知则为 null。 */
-  rawRunStatus: string | null;
-  /** 最近执行步骤投影；最多 8 条。 */
-  recentSteps: JobRecentStep[];
-  /** 终态可验收摘要；低信号时为 null。 */
-  resultDigest: string | null;
-  /** 证据质量；由 adapter 生成，phone 只用于回报提示。 */
-  evidenceQuality: JobEvidenceQuality;
-}
-
-interface DecisionContext {
-  job: AdapterJobRecord;
-  evidence: OpenClawExecutionEvidence;
-  rawRunStatus: OpenClawRunStatus | null;
-  taskOutcome: TaskOutcome;
-}
-
-type DecisionRule = (context: DecisionContext) => OpenClawToLanxinJobDecision | null;
 
 const DECISION_RULES: readonly DecisionRule[] = [
   terminalJobRule,
@@ -135,42 +88,6 @@ function firstRuleDecision(context: DecisionContext): OpenClawToLanxinJobDecisio
     }
   }
   return null;
-}
-
-function terminalJobRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
-  const { job, evidence } = context;
-  if (!TERMINAL_JOB_STATUSES.has(job.status)) {
-    return null;
-  }
-  // 空壳 completed 允许被 terminal_without_result 纠为 blocked，不永久闩锁。
-  if (isHollowCompletedJob(job)) {
-    return null;
-  }
-  return decide(context, job.status, {
-    kind: "lanxin.terminal_latch",
-    strength: "strong",
-    reasonCode: "lanxin.terminal_latch",
-    summary: job.progressSummary || summaryFromEvidence(evidence, "job 已在终态，拒绝迟到覆盖"),
-    blockedReason: job.blockedReason,
-    resumeCondition: job.resumeCondition,
-    rawRunStatus: context.rawRunStatus,
-  });
-}
-
-/**
- * 空壳 completed：无 present 业务证据或摘要仍是低信号。
- *
- * @param job adapter job
- * @returns 可被纠错时为 true
- */
-function isHollowCompletedJob(job: AdapterJobRecord): boolean {
-  if (job.status !== "completed") {
-    return false;
-  }
-  if (job.evidenceQuality !== "present") {
-    return true;
-  }
-  return isLowSignalText(job.progressSummary) && isLowSignalText(job.resultDigest);
 }
 
 function cancellationRule(context: DecisionContext): OpenClawToLanxinJobDecision | null {
@@ -429,82 +346,9 @@ function runningDecision(context: DecisionContext): OpenClawToLanxinJobDecision 
   });
 }
 
-function decide(
-  context: DecisionContext,
-  status: JobStatus,
-  input: {
-    kind: OpenClawEvidenceKind;
-    strength: OpenClawEvidenceStrength;
-    reasonCode: string;
-    summary: string;
-    blockedReason: string | null;
-    resumeCondition: string | null;
-    rawRunStatus?: string | null;
-  },
-): OpenClawToLanxinJobDecision {
-  const evidence = context.evidence;
-  const goal = context.job.goal;
-  let progressSummary = safeText(input.summary);
-  if (isLowSignalText(progressSummary)) {
-    progressSummary =
-      pickMeaningfulBusinessText(evidence, null, goal) ?? humanProgressFallback(status);
-  }
-  const classified = classifyBusinessEvidence(evidence, { goal, fallback: progressSummary });
-  if (
-    classified.quality === "present" &&
-    classified.text &&
-    /没有返回可验收/.test(progressSummary)
-  ) {
-    progressSummary = classified.text;
-  }
-  let blockedReason = input.blockedReason === null ? null : safeText(input.blockedReason);
-  if (classified.quality === "present" && blockedReason && /没有返回可验收/.test(blockedReason)) {
-    blockedReason = null;
-  }
-  // present 时不得保留空壳纠错理由码。
-  let statusReasonCode = input.reasonCode;
-  if (classified.quality === "present" && statusReasonCode === "openclaw.terminal_without_result") {
-    statusReasonCode = "openclaw.run_completed";
-  }
-  const projection = buildSuperviseProjection(evidence, status, progressSummary, { goal });
-  return {
-    status,
-    progressSummary,
-    blockedReason,
-    resumeCondition: input.resumeCondition === null ? null : safeText(input.resumeCondition),
-    statusReasonCode,
-    statusObservedAt: evidence.observedAt,
-    evidenceKind: input.kind,
-    evidenceStrength: input.strength,
-    rawRunStatus: input.rawRunStatus ?? normalizeEvidenceRunStatus(evidence),
-    recentSteps: projection.recentSteps,
-    resultDigest: projection.resultDigest,
-    evidenceQuality: projection.evidenceQuality,
-  };
-}
+import type { DecisionContext, DecisionRule, OpenClawToLanxinJobDecision } from "./decision/types.js";
+export type { OpenClawToLanxinJobDecision } from "./decision/types.js";
 
-/**
- * 低信号摘要时的状态人话兜底。
- *
- * @param status job 状态
- * @returns 非低信号的人话进度
- */
-function humanProgressFallback(status: JobStatus): string {
-  switch (status) {
-    case "completed":
-      return "OpenClaw 已返回可验收结果";
-    case "blocked":
-      return "OpenClaw 执行被阻塞";
-    case "failed":
-      return "OpenClaw 执行失败";
-    case "canceled":
-      return "OpenClaw 已确认取消";
-    case "needs_permission":
-      return "OpenClaw 正在等待授权";
-    case "queued":
-      return "OpenClaw 已接收任务";
-    case "running":
-    default:
-      return "OpenClaw 正在执行";
-  }
-}
+import { decide } from "./decision/result.js";
+
+import { terminalJobRule } from "./decision/rules/terminal.js";

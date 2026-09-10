@@ -7,6 +7,7 @@
  */
 
 import type { PermissionId } from "@lanxin-claw/protocol";
+import { permissionInferenceText } from "@lanxin-claw/protocol";
 
 /** 单项能力 */
 export interface OpenClawToolCapabilityItem {
@@ -124,7 +125,7 @@ export function classifyJobWebCapabilityNeed(input: {
   goal?: string | null;
   allowedPermissions?: readonly string[] | null;
 }): "web_search" | "browser" | "network" | null {
-  const goal = String(input.goal || "");
+  const goal = permissionInferenceText(input.goal);
   const perms = Array.isArray(input.allowedPermissions) ? input.allowedPermissions : [];
   const hasNetwork = perms.includes("network.access");
   const lower = goal.toLowerCase();
@@ -167,7 +168,7 @@ export function enrichPermissionsForWebResearch(
   permissions: readonly PermissionId[],
   goal: string | null | undefined,
 ): PermissionId[] {
-  if (!needsBrowserResearchPermissions({ goal, allowedPermissions: permissions })) {
+  if (!needsBrowserResearchPermissions({ ...(goal !== undefined ? { goal } : {}), allowedPermissions: permissions })) {
     return [...permissions];
   }
   const out: PermissionId[] = [];

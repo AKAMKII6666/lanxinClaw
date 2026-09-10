@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://lanxing.local/schemas/permission.schema.json",
   "title": "Lanxing Permission Payloads",
-  "description": "permission.* message payload shapes for protocol 0.1；companion 是授权权威",
+  "description": "permission.* message payload shapes for protocol 0.2；companion 是授权权威",
   "oneOf": [
     { "$ref": "#/$defs/permissionRequest" },
     { "$ref": "#/$defs/permissionDecision" }

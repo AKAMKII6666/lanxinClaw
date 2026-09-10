@@ -6,40 +6,25 @@
  * 纯函数：无 I/O。
  */
 
-import { AFFAIR_STATUSES } from "../../../states/affair-status.js";
+import { validationFailed } from "../../../errors/protocol-error.js";
+import {
+JOB_EVIDENCE_QUALITIES,
+JOB_RECENT_STEP_KINDS,
+type JobEvidenceQuality,
+type JobPayload,
+type JobRecentStep
+} from "../../../messages/payloads/core.js";
 import { JOB_STATUSES } from "../../../states/job-status.js";
 import {
-  JOB_EVIDENCE_QUALITIES,
-  JOB_RECENT_STEP_KINDS,
-  type AffairPayload,
-  type JobEvidenceQuality,
-  type JobPayload,
-  type JobRecentStep,
-} from "../../../messages/payloads/core.js";
-import {
-  expectDateTime,
-  expectEnum,
-  expectNonEmptyString,
-  expectObject,
-  expectStringArray,
-  expectStringOrNull,
-  optionalField,
-  rejectUnknownKeys,
+expectDateTime,
+expectEnum,
+expectNonEmptyString,
+expectObject,
+expectStringArray,
+expectStringOrNull,
+rejectUnknownKeys
 } from "../../primitives.js";
-import type { ValidateErr, ValidateResult } from "../../result.js";
-import { validationFailed } from "../../../errors/protocol-error.js";
-
-const AFFAIR_KEYS = [
-  "affairId",
-  "title",
-  "ownerAgent",
-  "status",
-  "context",
-  "acceptanceCriteria",
-  "blockedReason",
-  "resumeCondition",
-  "currentJobId",
-] as const;
+import type { ValidateResult } from "../../result.js";
 
 const JOB_KEYS = [
   "jobId",
@@ -61,113 +46,6 @@ const JOB_KEYS = [
   "statusReasonCode",
   "statusObservedAt",
 ] as const;
-
-/**
- * 读取可选 string|null 字段并写入目标对象。
- *
- * @param obj 源对象
- * @param key 字段名
- * @param target 目标载荷
- * @returns 失败时返回错误结果；成功返回 null
- */
-function assignOptionalStringOrNull<T extends object>(
-  obj: Record<string, unknown>,
-  key: keyof T & string,
-  target: T,
-): ValidateErr | null {
-  const checked = optionalField(obj, key, (v) => expectStringOrNull(v, key));
-  if (!checked.ok) {
-    return checked;
-  }
-  if (checked.value !== undefined) {
-    (target as Record<string, unknown>)[key] = checked.value;
-  }
-  return null;
-}
-
-/**
- * 读取可选 date-time|null 字段并写入 JobPayload。
- *
- * @param obj 源对象
- * @param key 字段名
- * @param target 目标载荷
- * @returns 失败时返回错误；成功返回 null
- */
-function assignOptionalDateTimeOrNull(
-  obj: Record<string, unknown>,
-  key: "statusObservedAt",
-  target: JobPayload,
-): ValidateErr | null {
-  if (!(key in obj)) {
-    return null;
-  }
-  if (obj[key] === null) {
-    target[key] = null;
-    return null;
-  }
-  const checked = expectDateTime(obj[key], key);
-  if (!checked.ok) {
-    return checked;
-  }
-  target[key] = checked.value;
-  return null;
-}
-
-/**
- * 校验 AffairPayload。
- *
- * @param value 待检 payload
- * @returns AffairPayload 或失败
- */
-export function validateAffairPayload(value: unknown): ValidateResult<AffairPayload> {
-  const obj = expectObject(value, "affair.payload");
-  if (!obj.ok) {
-    return obj;
-  }
-  const keys = rejectUnknownKeys(obj.value, AFFAIR_KEYS, "affair.payload");
-  if (!keys.ok) {
-    return keys;
-  }
-  const affairId = expectNonEmptyString(obj.value.affairId, "affairId");
-  if (!affairId.ok) {
-    return affairId;
-  }
-  const title = expectNonEmptyString(obj.value.title, "title");
-  if (!title.ok) {
-    return title;
-  }
-  const ownerAgent = expectEnum(obj.value.ownerAgent, "ownerAgent", ["zhang-boss"] as const);
-  if (!ownerAgent.ok) {
-    return ownerAgent;
-  }
-  const status = expectEnum(obj.value.status, "status", AFFAIR_STATUSES);
-  if (!status.ok) {
-    return status;
-  }
-  const context = expectStringArray(obj.value.context, "context");
-  if (!context.ok) {
-    return context;
-  }
-  const acceptanceCriteria = expectStringArray(obj.value.acceptanceCriteria, "acceptanceCriteria");
-  if (!acceptanceCriteria.ok) {
-    return acceptanceCriteria;
-  }
-  const payload: AffairPayload = {
-    affairId: affairId.value,
-    title: title.value,
-    ownerAgent: ownerAgent.value,
-    status: status.value,
-    context: context.value,
-    acceptanceCriteria: acceptanceCriteria.value,
-  };
-  for (const key of ["blockedReason", "resumeCondition", "currentJobId"] as const) {
-    const err = assignOptionalStringOrNull(obj.value, key, payload);
-    if (err) {
-      return err;
-    }
-  }
-  return { ok: true, value: payload };
-}
 
 /**
  * 读取 job 必填字段。
@@ -352,32 +230,8 @@ export function validateJobPayload(value: unknown): ValidateResult<JobPayload> {
   return mergeJobOptionals(obj.value, { ...required.value });
 }
 
-const JOB_CANCEL_KEYS = ["jobId", "affairId"] as const;
+import { assignOptionalDateTimeOrNull,assignOptionalStringOrNull } from "./job/fields.js";
 
-/**
- * 校验 job.cancel 载荷：至少 jobId 与 affairId（与协议消息目录对齐）。
- *
- * @param value 待检 payload
- * @returns 取消载荷或失败
- */
-export function validateJobCancelPayload(
-  value: unknown,
-): ValidateResult<{ jobId: string; affairId: string }> {
-  const obj = expectObject(value, "job.cancel.payload");
-  if (!obj.ok) {
-    return obj;
-  }
-  const keys = rejectUnknownKeys(obj.value, JOB_CANCEL_KEYS, "job.cancel.payload");
-  if (!keys.ok) {
-    return keys;
-  }
-  const jobId = expectNonEmptyString(obj.value.jobId, "jobId");
-  if (!jobId.ok) {
-    return jobId;
-  }
-  const affairId = expectNonEmptyString(obj.value.affairId, "affairId");
-  if (!affairId.ok) {
-    return affairId;
-  }
-  return { ok: true, value: { jobId: jobId.value, affairId: affairId.value } };
-}
+export { validateAffairPayload } from "./affair.js";
+
+export { validateJobCancelPayload } from "./job/cancel.js";

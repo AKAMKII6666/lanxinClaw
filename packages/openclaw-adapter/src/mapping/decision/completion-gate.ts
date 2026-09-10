@@ -6,6 +6,7 @@
  * 纯函数：不修改入参。
  */
 
+import { permissionInferenceText } from "@lanxin-claw/protocol";
 import type { OpenClawExecutionEvidence } from "../../evidence/openclaw-execution-evidence.js";
 import type { AdapterJobRecord } from "../../jobs/job-types.js";
 import {
@@ -87,7 +88,7 @@ function requiresStructuredCompletionEvidence(context: CompletionGateContext): b
   ) {
     return true;
   }
-  const goal = safeText(context.job.goal);
+  const goal = permissionInferenceText(context.job.goal);
   return /(browser|web|http|https|url|news|search|浏览器|网页|网址|新闻|搜索|联网)/i.test(goal);
 }
 

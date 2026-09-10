@@ -239,6 +239,10 @@ function updatedAtForAffair(state: CompanionBackendState, affair: AffairPayload)
  * @returns 进度摘要
  */
 function progressForAffair(state: CompanionBackendState, affair: AffairPayload): string {
+  const pending = [...state.affairActions.values()].find((record) => record.phase === "pending" && record.command.affairId === affair.affairId);
+  if (pending) return pending.command.status === "canceled"
+    ? "取消待确认：正在核实所有执行任务已停止；可再次取消以继续原请求"
+    : "验收关闭待确认：正在保存并核实关闭结果；可再次验收以继续原请求";
   const job = affair.currentJobId
     ? state.jobs.get(affair.currentJobId)
     : [...state.jobs.values()].reverse().find((item) => item.affairId === affair.affairId);
@@ -260,10 +264,8 @@ function terminalConflictSummary(affair: AffairPayload, job: JobPayload | undefi
   if (!status || (affair.status !== "canceled" && affair.status !== "closed")) {
     return null;
   }
-  if (affair.status === "canceled" && status !== "canceled") {
-    return status === "completed"
-      ? "历史状态冲突：事务曾被取消，但执行结果后来回来了"
-      : "历史状态冲突：事务已取消，但执行 job 仍有后续状态";
+  if (affair.status === "canceled" && !["canceled", "completed", "failed"].includes(status)) {
+    return "历史状态冲突：事务已取消，但执行 job 仍有后续状态";
   }
   if (affair.status === "closed" && status !== "completed") {
     return "历史状态冲突：事务已关闭，但执行 job 不是完成态";

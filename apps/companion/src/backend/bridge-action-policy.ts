@@ -6,6 +6,7 @@
  * 纯函数：只读 backend state。
  */
 
+import { precheckAffairClose } from "../affairs/actions/guards/precheck.js";
 import { canTransitionAffairStatus } from "@lanxin-claw/protocol";
 import type { BridgeActionResult, BridgeUiAction } from "../bridge/contract.js";
 import type { PermissionGate } from "../permissions/gate/permission-gate.js";
@@ -49,7 +50,7 @@ export function validateBridgeActionAgainstState(
   }
   switch (action.type) {
     case "affair.accept":
-      return validateAcceptAction(state, action.affairId, affair.status);
+      return validateAcceptAction(state, action);
     case "affair.requestRevision":
       return affair.status === "waiting_acceptance"
         ? null
@@ -78,6 +79,9 @@ function validatePermissionDecisionAction(
   if (!request) {
     return bridgeActionError("permission_not_found", "找不到对应的权限请求", false);
   }
+  if ([...state.affairActions.values()].some((record) => record.phase === "pending" && record.command.affairId === request.affairId)) {
+    return bridgeActionError("affair_closing", "事务正在关闭，该权限请求不能再授予", false);
+  }
   const queueStatus = gate.getQueueStatus(action.permissionRequestId);
   if (queueStatus !== "pending") {
     return bridgeActionError(
@@ -101,7 +105,7 @@ function validatePermissionDecisionAction(
   if (affair.status === "closed" || affair.status === "canceled") {
     return bridgeActionError("affair_terminal_for_permission", "事务已经结束，不能再授权执行", false);
   }
-  if (affair.currentJobId !== job.jobId) {
+  if (job.purpose !== "exploration" && affair.currentJobId !== job.jobId) {
     return bridgeActionError("permission_not_current_job", "该权限请求不属于当前执行 job，不能授权", false);
   }
   return null;
@@ -128,17 +132,11 @@ function validateSessionRequirement(
 
 function validateAcceptAction(
   state: CompanionBackendState,
-  affairId: string,
-  affairStatus: string,
+  action: Extract<BridgeUiAction, { type: "affair.accept" }>,
 ): BridgeActionResult | null {
-  if (affairStatus !== "waiting_acceptance") {
-    return bridgeActionError("affair_not_waiting_acceptance", "只有待验收事务才能接受结果", false);
-  }
-  const affair = state.affairs.get(affairId);
-  const job = affair?.currentJobId ? state.jobs.get(affair.currentJobId) : null;
-  return !job || job.status === "completed"
-    ? null
-    : bridgeActionError("job_not_completed", "当前 job 还没有执行结束，不能验收关闭", false);
+  const error = precheckAffairClose(state, { affairId: action.affairId, status: "closed",
+    expectedCurrentJobId: action.expectedCurrentJobId, acceptanceSummary: action.acceptanceSummary });
+  return error ? { ok: false, error } : null;
 }
 
 function validateTransition(

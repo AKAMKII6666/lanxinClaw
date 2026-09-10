@@ -9,6 +9,7 @@
 import {
   createEnvelope,
   type AffairPayload,
+  type AffairActionResult,
   type ChatContextAttachPayload,
   type ChatMessagePayload,
   type JobPayload,
@@ -142,7 +143,7 @@ export function buildAffairResumeEnvelope(
  */
 export function buildAffairCloseEnvelope(
   party: OutboundParty,
-  payload: AffairPayload,
+  payload: AffairActionResult,
 ): ProtocolEnvelope<any> {
   return createEnvelope({
     source: { kind: "companion", deviceId: party.desktopDeviceId },

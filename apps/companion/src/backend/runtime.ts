@@ -5,130 +5,44 @@
  * 不拥有：HTTP/WebSocket 监听、OpenClaw runtime 具体实现、renderer UI。
  * 副作用：更新内存 state 并推送 bridge snapshot。
  */
+import { superviseBackendAffair } from "./supervision/observe.js";
 
-import type { AffairPayload, ProtocolEnvelope } from "@lanxin-claw/protocol";
-import { CompanionBridgeHost, type SnapshotListener } from "../bridge/host.js";
+
+import type { AffairPayload } from "@lanxin-claw/protocol";
+import { AffairActionCoordinator } from "../affairs/actions/coordinator.js";
+import { commitJobCreation } from "./jobs/create.js";
+import { createMemoryAuditStore } from "../audit/memory-store.js";
 import type {
-  BridgeActionDelivery,
-  BridgeActionResult,
-  BridgeUiAction,
-  ControlPanelSnapshotView,
+BridgeActionDelivery
 } from "../bridge/contract.js";
-import type { PendingPermissionCardView } from "../permissions/views.js";
-import { PermissionGate } from "../permissions/gate/permission-gate.js";
-import { buildDiagnosticReport, type BuildDiagnosticReportInput } from "../diagnostics/probes.js";
-import type { DiagnosticReportView } from "../ui/pages/diagnostics/diagnostics-models.js";
+import { CompanionBridgeHost } from "../bridge/host.js";
 import {
-  applyProtocolEnvelopeToState,
-  createCompanionBackendState,
-  reconcileAffairsFromJobs,
-} from "../state/store.js";
-import { projectControlPanelSnapshot, type SnapshotProjectionExtras } from "../state/projector.js";
-import {
-  hydrateBackendMirror,
-  snapshotBackendMirror,
-  type BackendMirrorStore,
-} from "../state/mirror/backend-mirror.js";
-import type { ApplyProtocolResult, CompanionBackendState } from "../state/types.js";
-import { createMemoryAuditStore, type AppendAuditInput } from "../audit/memory-store.js";
-import type { AuditRecord, AuditRecordView } from "../audit/types.js";
-import {
-  createPendingContextQueue,
-  type PendingContextQueue,
+createPendingContextQueue
 } from "../chat/channel/pending-context.js";
+import { buildDiagnosticReport } from "../diagnostics/probes.js";
+import { PermissionGate } from "../permissions/gate/permission-gate.js";
 import {
-  createSupervisionNotifyMemory,
-  rememberBlockedNotify,
-  runSupervisionTick,
+hydrateBackendMirror,
+snapshotBackendMirror
+} from "../state/mirror/backend-mirror.js";
+import { projectControlPanelSnapshot } from "../state/projector.js";
+import {
+applyProtocolEnvelopeToState,
+createCompanionBackendState,
+reconcileAffairsFromJobs,
+} from "../state/store.js";
+import {
+createSupervisionNotifyMemory
 } from "../supervision/tick.js";
-import { applySupervisionActions } from "../supervision/apply-actions.js";
-import type { SupervisionAction, SupervisionSnapshot } from "../supervision/types.js";
 import { validateBridgeActionAgainstState } from "./bridge-action-policy.js";
+import { applyMessageReceipt } from "./chat/message-receipts.js";
 import {
-  appendAuditForApplyFailure,
-  appendAuditForBridgeAction,
-  appendAuditForEnvelope,
-  auditRecordsToViews,
-  expirePermissionsForTerminalAffair,
+appendAuditForApplyFailure,
+appendAuditForBridgeAction,
+appendAuditForEnvelope,
+auditRecordsToViews,
+expirePermissionsForTerminalAffair,
 } from "./runtime-audit.js";
-
-/**
- * Backend runtime 选项。
- */
-export interface CompanionBackendRuntimeOptions {
-  /** 初始 state；缺省创建空 state */
-  state?: CompanionBackendState;
-  /** 权限 gate；缺省空 gate */
-  permissionGate?: PermissionGate;
-  /** audit store；缺省内存，Electron main 注入文件实现 */
-  auditStore?: {
-    append: (record: AppendAuditInput) => { ok: true; record: AuditRecord } | { ok: false; code: string; message: string };
-    listRecent: (limit?: number) => AuditRecord[];
-  };
-  /** 诊断实时输入；由 shell/protocol/gateway 层提供 */
-  diagnosticsInput?: () => BuildDiagnosticReportInput;
-  /** snapshot 投影覆盖（Gateway / 凭据） */
-  snapshotExtras?: () => SnapshotProjectionExtras;
-  /** in-flight 镜像落盘 */
-  mirrorStore?: BackendMirrorStore;
-  /** pending 精确文本队列 */
-  pendingContext?: PendingContextQueue;
-  /** 监督 tick 间隔毫秒；0 关闭。默认关闭，桌面壳显式打开 */
-  supervisionIntervalMs?: number;
-  /** 把监督动作送到 protocol broadcast（已含 apply）；缺省只写本地 state */
-  onProtocolBroadcast?: (envelope: ProtocolEnvelope) => void;
-  /** 桌面提醒 */
-  onDesktopNotify?: (title: string, body: string) => void;
-  /** 桌面设备 id */
-  desktopDeviceId?: string;
-  /** 撤销配对时回调（identity + protocol） */
-  onDeviceRevokePairing?: (input: {
-    phoneDeviceId: string;
-    desktopDeviceId: string;
-  }) => Promise<void>;
-  /** bridge action 被接受后的 backend side-effect；不得暴露给 renderer */
-  onBridgeAction?: (action: BridgeUiAction, result: BridgeActionResult) => void | Promise<void>;
-}
-
-/**
- * Companion backend API。
- */
-export interface CompanionBackendRuntime {
-  /** 应用入站协议 envelope */
-  applyProtocolEnvelope(envelope: ProtocolEnvelope): ApplyProtocolResult;
-  /** 应用 UI 操作 */
-  applyBridgeAction(action: BridgeUiAction): Promise<BridgeActionResult>;
-  /** 订阅 snapshot */
-  subscribeSnapshot(listener: SnapshotListener): () => void;
-  /** 读取 snapshot */
-  getSnapshot(): ControlPanelSnapshotView;
-  /** 读取待确认权限卡片 */
-  listPendingPermissionCards(): PendingPermissionCardView[];
-  /** 标记电话会话失联（心跳超时）；affair/job 保留，业务消息重新要求 session */
-  markConnectionLost(): void;
-  /** 读取内部 state（测试/诊断用） */
-  getState(): CompanionBackendState;
-  /** 读取 bridge host */
-  getBridgeHost(): CompanionBridgeHost;
-  /** 读取权限 gate（仅 backend/server 层使用） */
-  getPermissionGate(): PermissionGate;
-  /** 读取真实诊断报告 */
-  getDiagnosticReport(): DiagnosticReportView;
-  /** pending 队列（出站 flush 用） */
-  getPendingContext(): PendingContextQueue;
-  /** 记录 bridge action 投递后继回执 */
-  recordBridgeActionDelivery(delivery: BridgeActionDelivery): void;
-  /** 停止监督 loop */
-  stopSupervision(): void;
-  /** 记录入站 messageId（job.create 等 ack 前去重） */
-  recordInboundMessageId(messageId: string): void;
-  /**
-   * 追加脱敏审计。
-   *
-   * @param input 审计字段
-   */
-  appendAudit(input: AppendAuditInput): void;
-}
 
 /**
  * 创建 companion backend runtime。
@@ -151,6 +65,7 @@ export function createCompanionBackendRuntime(
   }
   const notifyMemory = createSupervisionNotifyMemory();
   const host = new CompanionBridgeHost(projectNow(), gate);
+  const affairActions = new AffairActionCoordinator({ state, gate, persist: persistMirror, publish: publishSnapshot });
 
   function projectNow() {
     return projectControlPanelSnapshot(state, {
@@ -163,6 +78,8 @@ export function createCompanionBackendRuntime(
     options.mirrorStore?.save(snapshotBackendMirror(state, pendingContext.list()));
   }
 
+  pendingContext.setOnChange(persistMirror);
+
   function rememberBridgeActionDelivery(delivery: BridgeActionDelivery): void {
     state.bridgeActionDeliveries.unshift(delivery);
     state.bridgeActionDeliveries.splice(50);
@@ -174,57 +91,9 @@ export function createCompanionBackendRuntime(
     persistMirror();
   }
 
-  function rememberNotify(actions: readonly SupervisionAction[]): void {
-    for (const action of actions) {
-      if (action.kind === "notify_blocked") {
-        rememberBlockedNotify(notifyMemory, action.affairId, action.fingerprint);
-      }
-    }
-  }
-
-  function superviseAffair(affair: AffairPayload): void {
-    const job = affair.currentJobId ? state.jobs.get(affair.currentJobId) : undefined;
-    const snapshot: SupervisionSnapshot = {
-      affairId: affair.affairId,
-      affairTitle: affair.title,
-      affairStatus: affair.status as SupervisionSnapshot["affairStatus"],
-      jobId: job?.jobId ?? affair.currentJobId ?? null,
-      jobStatus: (job?.status as SupervisionSnapshot["jobStatus"]) ?? null,
-      jobPurpose: job?.purpose ?? "execution",
-      progressSummary: job?.progressSummary ?? "",
-      attemptedSteps: [],
-      blockedReason: affair.blockedReason ?? job?.blockedReason ?? null,
-      resumeCondition: affair.resumeCondition ?? job?.resumeCondition ?? null,
-      observedAt: new Date().toISOString(),
-    };
-    const actions = runSupervisionTick(snapshot, notifyMemory);
-    const party = state.connection.phoneDeviceId
-      ? {
-          desktopDeviceId: options.desktopDeviceId ?? "lanxin-desktop",
-          phoneDeviceId: state.connection.phoneDeviceId,
-        }
-      : null;
-    applySupervisionActions(actions, {
-      getAffair: (affairId) => state.affairs.get(affairId),
-      broadcast: (envelope) => {
-        if (options.onProtocolBroadcast) {
-          options.onProtocolBroadcast(envelope);
-          return;
-        }
-        applyProtocolEnvelopeToState(state, envelope);
-      },
-      applyOnly: (envelope) => {
-        applyProtocolEnvelopeToState(state, envelope);
-      },
-      party,
-      ...(options.onDesktopNotify ? { onDesktopNotify: options.onDesktopNotify } : {}),
-    });
-    rememberNotify(actions);
-  }
-
   function runSupervisionPass(): void {
     for (const affair of state.affairs.values()) {
-      superviseAffair(affair);
+      superviseBackendAffair(state, affair, options, notifyMemory);
     }
     publishSnapshot();
   }
@@ -239,7 +108,37 @@ export function createCompanionBackendRuntime(
   supervisionTimer?.unref?.();
 
   return {
+    applyJobCreation(command, events) {
+      const result = commitJobCreation(state, command, events, persistMirror);
+      if (result.ok) {
+        for (const event of events) appendAuditForEnvelope(auditStore, event);
+        host.setSnapshot(projectNow());
+      }
+      return result;
+    },
+    getAffairActions: () => affairActions,
     applyProtocolEnvelope(envelope) {
+      if (envelope.type === "chat.read_receipt") {
+        const receipt = applyMessageReceipt(state, pendingContext, envelope, persistMirror);
+        if (receipt.ok) publishSnapshot();
+        return receipt;
+      }
+      if (envelope.type === "affair.close") {
+        return { ok: false, code: "affair_action_required", message: "关闭命令与结果由事务协调器处理", retryable: false };
+      }
+      if (envelope.type.startsWith("affair.")) {
+        const fact = envelope.payload as { affairId?: string; status?: string };
+        if (fact.affairId && ["closed", "canceled"].includes(fact.status ?? "") &&
+            state.affairs.get(fact.affairId)?.status !== fact.status) {
+          return { ok: false, code: "affair_action_required", message: "终态必须由共同事务协调器提交", retryable: false };
+        }
+      }
+      if (envelope.source.kind === "phone" && envelope.type.startsWith("affair.")) {
+        const payload = envelope.payload as unknown as AffairPayload;
+        if (["closed", "canceled"].includes(payload.status) || affairActions.isClosing(payload.affairId)) {
+          return { ok: false, code: "affair_action_required", message: "事务关闭必须经动作协调器确认", retryable: false };
+        }
+      }
       const result = applyProtocolEnvelopeToState(state, envelope);
       if (!result.ok) {
         appendAuditForApplyFailure(auditStore, envelope, result);
@@ -282,6 +181,9 @@ export function createCompanionBackendRuntime(
       const statefulError = validateBridgeActionAgainstState(state, action, gate);
       if (statefulError) {
         return statefulError;
+      }
+      if ((action.type === "affair.accept" || action.type === "affair.cancel") && !options.onBridgeAction) {
+        return { ok: false, error: { code: "affair_action_unavailable", message: "事务协调器尚未接入桌面动作", retryable: true } };
       }
       const result = host.submitAction(action);
       if (result.ok) {
@@ -379,3 +281,6 @@ export function createCompanionBackendRuntime(
     },
   };
 }
+
+import type { CompanionBackendRuntime, CompanionBackendRuntimeOptions } from "./contracts/runtime.js";
+export type { CompanionBackendRuntime, CompanionBackendRuntimeOptions } from "./contracts/runtime.js";

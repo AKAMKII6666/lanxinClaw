@@ -9,9 +9,10 @@
 import type {
   AffairPayload,
   JobStatus,
+  JobPayload,
   ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
-import type { OpenClawAdapter } from "@lanxin-claw/openclaw-adapter";
+import type { AdapterJobRecord, OpenClawAdapter } from "@lanxin-claw/openclaw-adapter";
 import type { Logger } from "pino";
 import type { PermissionGate } from "../../permissions/gate/permission-gate.js";
 import type { ApplyProtocolResult } from "../../state/types.js";
@@ -28,6 +29,12 @@ export const IN_FLIGHT_PLACEHOLDER = Symbol("in_flight");
 
 /** 委派器依赖 */
 export interface JobDelegatorDeps {
+  /** 与 UI/WS 共用的事务串行队列 */
+  runAffairOperation?: <T>(affairId: string, operation: () => Promise<T>) => Promise<T>;
+  /** 已持久化的关闭围栏 */
+  isAffairClosing?: (affairId: string) => boolean;
+  /** backend 当前完整 job；仅用于执行器尚未登记的取消 */
+  getJob?: (jobId: string) => JobPayload | undefined;
   /** 已注入 runtime 的 adapter */
   adapter: OpenClawAdapter;
   /** 桌面授权权威 */
@@ -58,6 +65,8 @@ export interface JobDelegatorDeps {
 
 /** 活跃轮询项 */
 export interface ActivePoll {
+  /** 已取得但 backend 尚未成功提交的快照；重试前不再请求 runtime */
+  pendingPublication: PendingJobPublication | null;
   /** 上次已广播的用户可见状态指纹 */
   lastFingerprint: string;
   /** 最近一次成功读取到的 job 投影 */
@@ -67,3 +76,8 @@ export interface ActivePoll {
   /** 轮询定时器 */
   timer: NodeJS.Timeout;
 }
+
+/** 未完整提交的 runtime 快照或明确失败事实。 */
+export type PendingJobPublication =
+  | { kind: "adapter"; job: AdapterJobRecord }
+  | { kind: "failure"; job: DelegatorJobProjection };

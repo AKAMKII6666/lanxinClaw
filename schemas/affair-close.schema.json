@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/affair-close.schema.json",
+  "title": "Affair close command or committed companion fact",
+  "oneOf": [
+    {
+      "$ref": "affair-action-result.schema.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "affairId",
+        "status",
+        "expectedCurrentJobId"
+      ],
+      "properties": {
+        "affairId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "closed",
+            "canceled"
+          ]
+        },
+        "expectedCurrentJobId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "acceptanceSummary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "closeReason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "closed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "acceptanceSummary"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

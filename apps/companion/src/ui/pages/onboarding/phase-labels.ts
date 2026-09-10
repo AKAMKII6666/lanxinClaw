@@ -11,7 +11,7 @@ import type { OnboardingPhase } from "../../../bridge/contract.js";
 /** 阶段默认文案 */
 export const ONBOARDING_PHASE_LABELS: Record<OnboardingPhase, string> = {
   verifying_key: "正在验证 API Key…",
-  starting_runtime: "正在启动 OpenClaw 运行时（首次可能需要约 1 分钟）…",
+  starting_runtime: "正在启动 OpenClaw 运行时（首次可能需要数分钟，请保持网络连接）…",
 };
 
 /**

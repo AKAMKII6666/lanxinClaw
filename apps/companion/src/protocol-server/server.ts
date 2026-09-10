@@ -6,23 +6,21 @@
  * 副作用：监听 TCP 端口；广播协议消息。
  */
 
-import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
-import { WebSocketServer, type WebSocket } from "ws";
 import { createEnvelope, type ProtocolEnvelope } from "@lanxin-claw/protocol";
+import { type IncomingMessage } from "node:http";
+import { WebSocketServer, type WebSocket } from "ws";
 import type { PairingSession } from "../pairing/session.js";
 import type { ApplyProtocolResult } from "../state/types.js";
-import { approvePendingPairing, handleProtocolSocketMessage } from "./router.js";
-import { isLoopbackAddress } from "./guards/http/http-guard.js";
-import { shouldSendEnvelopeToSocket } from "./guards/ws/ws-audience.js";
 import { createProtocolLogDto } from "./protocol-log-dto.js";
+import { approvePendingPairing, handleProtocolSocketMessage } from "./router.js";
 import type {
-  CompanionProtocolServerHandle,
-  CompanionProtocolServerOptions,
+CompanionProtocolServerHandle,
+CompanionProtocolServerOptions,
 } from "./server-types.js";
 
 export type {
-  CompanionProtocolServerHandle,
-  CompanionProtocolServerOptions,
+CompanionProtocolServerHandle,
+CompanionProtocolServerOptions
 } from "./server-types.js";
 
 interface PendingPairingRef { current: PairingSession | null; }
@@ -280,144 +278,6 @@ function startHeartbeatMonitor(
   return timer;
 }
 
-/**
- * 创建 HTTP server。
- *
- * @param options 选项
- * @returns HTTP server
- */
-function createProtocolHttpServer(options: CompanionProtocolServerOptions): HttpServer {
-  return createServer((req, res) => {
-    if (req.url === "/health") {
-      writeJson(res, 200, { ok: true, service: "lanxin-companion-protocol" });
-      return;
-    }
-    if (req.url === "/snapshot") {
-      const remote = req.socket.remoteAddress;
-      if (!isLoopbackAddress(remote)) {
-        writeJson(res, 403, { ok: false, error: { code: "snapshot_loopback_only", message: "snapshot 仅本机回环可访问" } });
-        return;
-      }
-      writeJson(res, 200, options.backend.getSnapshot());
-      return;
-    }
-    writeJson(res, 404, { ok: false, error: { code: "not_found", message: "未知 endpoint" } });
-  });
-}
+import { createProtocolBroadcaster } from "./transport/broadcast.js";
 
-/**
- * 创建广播与纯发送函数。
- *
- * @param options 选项
- * @param clients 客户端集合
- * @returns broadcast（apply+send）与 sendEnvelope（仅 send）
- */
-function createProtocolBroadcaster(
-  options: CompanionProtocolServerOptions,
-  clients: Set<WebSocket>,
-  authenticatedSockets: Set<WebSocket>,
-): {
-  broadcast: (envelope: ProtocolEnvelope) => ApplyProtocolResult;
-  sendEnvelope: (envelope: ProtocolEnvelope) => void;
-} {
-  const sendEnvelope = (envelope: ProtocolEnvelope): void => {
-    const text = JSON.stringify(envelope);
-    let sentCount = 0;
-    let skippedCount = 0;
-    for (const client of clients) {
-      if (client.readyState !== client.OPEN) {
-        skippedCount += 1;
-        continue;
-      }
-      if (!shouldSendEnvelopeToSocket(envelope.type, authenticatedSockets.has(client))) {
-        skippedCount += 1;
-        continue;
-      }
-      client.send(text);
-      sentCount += 1;
-    }
-    options.logger?.info(
-      {
-        event: "protocol.outbound.dto",
-        dto: createProtocolLogDto(envelope),
-        sentCount,
-        skippedCount,
-      },
-      "协议出站 DTO",
-    );
-  };
-  const broadcast = (envelope: ProtocolEnvelope): ApplyProtocolResult => {
-    const applied = options.backend.applyProtocolEnvelope(envelope);
-    if (!applied.ok) {
-      options.logger?.warn(
-        { event: "protocol.broadcast.apply_failed", dto: createProtocolLogDto(envelope), applied },
-        "协议广播 apply 失败",
-      );
-      return applied;
-    }
-    options.logger?.info(
-      { event: "protocol.broadcast.applied", dto: createProtocolLogDto(envelope) },
-      "协议广播已写入状态",
-    );
-    sendEnvelope(envelope);
-    return applied;
-  };
-  return { broadcast, sendEnvelope };
-}
-
-/**
- * 监听端口。
- */
-async function listen(server: HttpServer, port: number, host: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, resolve);
-  });
-}
-
-/**
- * 关闭 server。
- */
-async function closeServer(
-  httpServer: HttpServer,
-  wss: WebSocketServer,
-  clients: Set<WebSocket>,
-): Promise<void> {
-  for (const client of clients) {
-    client.terminate();
-  }
-  clients.clear();
-  for (const client of wss.clients) {
-    client.terminate();
-  }
-  await new Promise<void>((resolve, reject) => {
-    wss.close((err) => {
-      if (!err || err.message === "The server is not running") {
-        resolve();
-        return;
-      }
-      reject(err);
-    });
-  });
-  await new Promise<void>((resolve, reject) => {
-    httpServer.close((err) => {
-      if (!err || (err as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") {
-        resolve();
-        return;
-      }
-      reject(err);
-    });
-  });
-}
-
-/**
- * 写 HTTP JSON。
- */
-function writeJson(
-  res: { writeHead: (status: number, headers: Record<string, string>) => void; end: (body: string) => void },
-  status: number,
-  body: unknown,
-): void {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(body));
-}
+import { closeServer, createProtocolHttpServer, listen } from "./transport/http.js";

@@ -15,12 +15,15 @@ import type {
 import type { PendingContextItem } from "../../chat/channel/pending-context.js";
 import { JsonFilePersistence } from "../../persistence/json-file.js";
 import type { BridgeActionDelivery } from "../../bridge/contract.js";
+import type { AffairActionRecord } from "../../affairs/actions/types.js";
 import type { CompanionBackendState } from "../types.js";
 
 /** 落盘根 */
 interface BackendMirrorRoot {
   /** schema */
   schemaVersion: 1;
+  /** 关闭意图及原始结果；旧镜像缺省为空 */
+  affairActions?: AffairActionRecord[];
   /** affairs */
   affairs: AffairPayload[];
   /** jobs */
@@ -29,6 +32,8 @@ interface BackendMirrorRoot {
   chatMessages: ChatMessagePayload[];
   /** context_attach */
   contextAttachments: ChatContextAttachPayload[];
+  /** 原消息的已确认消费证明 */
+  chatReceipts?: CompanionBackendState["chatReceipts"];
   /** pending 精确文本 */
   pendingContext: PendingContextItem[];
   /** 最近 UI action 投递回执 */
@@ -78,10 +83,12 @@ export function snapshotBackendMirror(
 ): BackendMirrorRoot {
   return {
     schemaVersion: 1,
+    affairActions: [...state.affairActions.values()],
     affairs: [...state.affairs.values()],
     jobs: [...state.jobs.values()],
     chatMessages: [...state.chatMessages],
     contextAttachments: [...state.contextAttachments],
+    chatReceipts: [...state.chatReceipts],
     pendingContext: pendingContext.map((item) => ({ ...item })),
     bridgeActionDeliveries: state.bridgeActionDeliveries.map((item) => ({ ...item })),
   };
@@ -94,6 +101,8 @@ export function snapshotBackendMirror(
  * @param root 镜像
  */
 export function hydrateBackendMirror(state: CompanionBackendState, root: BackendMirrorRoot): void {
+  state.affairActions.clear();
+  for (const record of root.affairActions ?? []) state.affairActions.set(record.key, record);
   state.affairs.clear();
   for (const affair of root.affairs ?? []) {
     state.affairs.set(affair.affairId, affair);
@@ -103,6 +112,7 @@ export function hydrateBackendMirror(state: CompanionBackendState, root: Backend
     state.jobs.set(job.jobId, job);
   }
   state.chatMessages.splice(0, state.chatMessages.length, ...(root.chatMessages ?? []));
+  state.chatReceipts.splice(0, state.chatReceipts.length, ...(root.chatReceipts ?? []));
   state.contextAttachments.splice(
     0,
     state.contextAttachments.length,

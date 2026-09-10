@@ -13,7 +13,7 @@ const ad: DiscoveryAdvertisement = {
   deviceName: "Test-PC",
   deviceIdHint: "hint_001",
   serviceVersion: "0.1.0",
-  protocolVersion: "0.1",
+  protocolVersion: "0.2",
   pairingAvailable: true,
   pairedPhoneIds: [],
   capabilities: ["pairing.v1"],

@@ -114,6 +114,7 @@ export function createMemoryRendererBridge(host: CompanionBridgeHost): RendererB
           },
         ],
         lastError: null,
+        browserProxy: { enabled: false, url: "http://127.0.0.1:7890" },
         copyText: `overall=${snapshot.clawCore.adapterReady ? "ok" : "warn"}; companion=${snapshot.companion.status}; device=${snapshot.device.status}`,
       };
     },

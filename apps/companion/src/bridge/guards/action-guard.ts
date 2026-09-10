@@ -33,7 +33,6 @@ const AFFAIR_ID_ACTION_TYPES = new Set<string>([
   "affair.pause",
   "affair.resume",
   "affair.cancel",
-  "affair.accept",
   "affair.requestRevision",
   "affair.requestAcceptance",
 ]);
@@ -55,6 +54,8 @@ type ActionCandidate = {
   type?: unknown;
   page?: unknown;
   affairId?: unknown;
+  expectedCurrentJobId?: unknown;
+  acceptanceSummary?: unknown;
   phoneDeviceId?: unknown;
   desktopDeviceId?: unknown;
   permissionRequestId?: unknown;
@@ -179,6 +180,11 @@ function isBrowserProxySettingsAction(typed: ActionCandidate): boolean {
  * @returns 是否匹配
  */
 function matchesPayloadAction(typed: ActionCandidate & { type: string }): boolean {
+  if (typed.type === "affair.accept") {
+    return typeof typed.affairId === "string" && !!typed.affairId.trim() &&
+      typeof typed.expectedCurrentJobId === "string" && !!typed.expectedCurrentJobId.trim() &&
+      typeof typed.acceptanceSummary === "string" && !!typed.acceptanceSummary.trim();
+  }
   if (typed.type === "navigate") {
     return isNavigateAction(typed.page);
   }

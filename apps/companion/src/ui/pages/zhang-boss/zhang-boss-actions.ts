@@ -42,7 +42,7 @@ export function submitZhangBossMessage(
         return;
       }
       onOk(built.value.text);
-    });
+    }).catch((error: unknown) => onFail(error instanceof Error ? error.message : "消息尚未确认保存，请重试"));
 }
 
 /**

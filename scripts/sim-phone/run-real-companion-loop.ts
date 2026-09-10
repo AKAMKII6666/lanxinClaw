@@ -291,9 +291,13 @@ async function main(): Promise<void> {
     runtime.advance({
       runId: delegated.job.openclawRunId,
       status: "completed",
-      patch: { summary: "adapter mock completed after permission grant" },
+      patch: { summary: "只读检查完成：a.txt、b.txt、c.txt 三个文件存在；未修改工作区文件。" },
     });
-    await phone.nextEnvelope("job.completed");
+    try { await phone.nextEnvelope("job.completed"); }
+    catch (error) {
+      const job = backend.getState().jobs.get(jobId);
+      throw new Error(`${String(error)}; status=${job?.status} reason=${job?.statusReasonCode} summary=${job?.progressSummary}`);
+    }
     assertCompanionToPhone(await phone.nextEnvelope("affair.update"));
 
     process.stdout.write(

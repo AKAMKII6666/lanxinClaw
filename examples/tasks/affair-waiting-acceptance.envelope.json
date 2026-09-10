@@ -1,5 +1,5 @@
 {
-  "protocolVersion": "0.1",
+  "protocolVersion": "0.2",
   "messageId": "msg_affair_waiting_acceptance_001",
   "correlationId": "msg_job_completed_001",
   "sentAt": "2026-07-23T00:21:00.000Z",

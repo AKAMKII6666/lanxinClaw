@@ -184,22 +184,10 @@ describe("real UI projections", () => {
         permissionRequestId: "perm_projection_canceled",
       },
     }));
-    backend.applyProtocolEnvelope(createEnvelope({
-      source: { kind: "phone", deviceId: "phone_proj_terminal" },
-      target: { kind: "companion", deviceId: "desktop_proj_terminal" },
-      type: "affair.close",
-      payload: {
-        affairId: "affair_projection_canceled",
-        title: "已取消的重复任务",
-        ownerAgent: "zhang-boss",
-        status: "canceled",
-        context: [],
-        acceptanceCriteria: ["不继续"],
-        currentJobId: "job_projection_canceled",
-        blockedReason: "用户取消",
-        resumeCondition: null,
-      },
-    }));
+    // UI 必须仍能显示旧版已落盘的终态冲突详情。
+    backend.getState().affairs.set("affair_projection_canceled", {
+      ...backend.getState().affairs.get("affair_projection_canceled")!, status: "canceled",
+    });
     backend.applyProtocolEnvelope(createEnvelope({
       source: { kind: "phone", deviceId: "phone_proj_terminal" },
       target: { kind: "companion", deviceId: "desktop_proj_terminal" },

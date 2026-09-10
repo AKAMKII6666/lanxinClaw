@@ -20,8 +20,10 @@ export const JOB_STATUSES = [
 /** Job 执行状态 */
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
-const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
-  queued: ["running", "needs_permission", "completed", "canceled"],
+/** 唯一迁移合同；phone 的部署 JSON 必须从这里生成，禁止手改副本。 */
+export const JOB_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
+  // 明确提交拒绝/创建失败可在 runtime 接受前失败；确认超时不属于这条边。
+  queued: ["running", "needs_permission", "completed", "failed", "canceled"],
   running: ["needs_permission", "blocked", "completed", "failed", "canceled"],
   needs_permission: ["running", "blocked", "failed", "canceled"],
   blocked: ["running", "failed", "canceled"],

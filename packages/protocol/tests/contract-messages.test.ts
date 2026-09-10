@@ -124,7 +124,7 @@ describe("protocol message contract 正反例", () => {
 
   it("反例：未知 message type", () => {
     const bad = validateMessage({
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
       messageId: "msg_unknown_type",
       sentAt: "2026-07-23T00:00:00.000Z",
       source: { kind: "phone", deviceId: "p1" },

@@ -22,7 +22,8 @@ export const AFFAIR_STATUSES = [
 /** Affair 生命周期状态 */
 export type AffairStatus = (typeof AFFAIR_STATUSES)[number];
 
-const AFFAIR_TRANSITIONS: Record<AffairStatus, readonly AffairStatus[]> = {
+/** 唯一迁移合同；phone 的部署 JSON 必须从这里生成，禁止手改副本。 */
+export const AFFAIR_TRANSITIONS: Record<AffairStatus, readonly AffairStatus[]> = {
   clarifying: ["ready", "canceled"],
   ready: ["delegated", "clarifying", "canceled"],
   delegated: ["running", "blocked", "paused", "canceled"],

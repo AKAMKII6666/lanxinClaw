@@ -101,7 +101,7 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): D
     url: (input.browserProxyUrl?.trim() || "http://127.0.0.1:7890"),
   };
   return {
-    schemaVersion: "0.1",
+    schemaVersion: "0.2",
     reportId: `diag_${Date.now()}`,
     generatedAt: new Date().toISOString(),
     overallStatus,

@@ -6,30 +6,27 @@
  * 不拥有：renderer 直连副作用、OpenClaw 执行、affair 关闭、凭据明文。
  * 副作用：仅更新本实例内存；不读写磁盘/网络。
  */
+import { restorePermissionGate, snapshotPermissionGate, type PermissionGateSnapshot } from "./persistence/snapshot.js";
+import { projectPendingCards, projectPermissionDecision } from "./projection/cards.js";
+import { grantableRequestIds, pendingRequestIds } from "./projection/requests.js";
+
 
 import {
-  createPermissionRequestId,
-  isPermissionDecision,
-  type PermissionDecision,
-  type PermissionDecisionPayload,
-  type PermissionId,
+createPermissionRequestId,
+isPermissionDecision,
+type PermissionDecision,
+type PermissionDecisionPayload,
+type PermissionId,
 } from "@lanxin-claw/protocol";
+import type { PendingPermissionCardView } from "../views.js";
 import { applyPermissionDecision } from "./apply-decision.js";
 import { classifyPermissionPolicy, isAllowedByDefault } from "./policy/default-policy.js";
 import type {
-  GateDecisionResult,
-  GatePermissionRequest,
-  PermissionGrantRecord,
-  PermissionQueueStatus,
+GateDecisionResult,
+GatePermissionRequest,
+PermissionGrantRecord,
+PermissionQueueStatus,
 } from "./types.js";
-import type { PendingPermissionCardView, PermissionDecisionChoice } from "../views.js";
-
-const ALL_DECISIONS: PermissionDecisionChoice[] = [
-  "allow_once",
-  "allow_for_job",
-  "deny",
-  "require_more_context",
-];
 
 /**
  * 内存版 permission gate。
@@ -195,30 +192,7 @@ export class PermissionGate {
    *
    * @returns 待确认卡片
    */
-  listPendingCards(): PendingPermissionCardView[] {
-    const cards: PendingPermissionCardView[] = [];
-    for (const [id, status] of this.#queueStatus) {
-      if (status !== "pending") {
-        continue;
-      }
-      const request = this.#requests.get(id);
-      if (!request) {
-        continue;
-      }
-      cards.push({
-        permissionRequestId: request.permissionRequestId,
-        requester: request.requester,
-        affairId: request.affairId,
-        jobId: request.jobId,
-        reason: request.reason,
-        risk: request.risk,
-        scopeSummary: summarizeScope(request),
-        denyConsequence: request.denyConsequence,
-        availableDecisions: [...ALL_DECISIONS],
-      });
-    }
-    return cards;
-  }
+  listPendingCards(): PendingPermissionCardView[] { return projectPendingCards(this.#requests, this.#queueStatus); }
 
   /**
    * 组装可发给 phone 的 permission.decision 载荷字段。
@@ -228,66 +202,36 @@ export class PermissionGate {
    * @param jobId 可选 job
    * @returns payload 或 null
    */
-  toDecisionPayload(
-    result: GateDecisionResult,
-    permissionRequestId: string,
-    jobId?: string | null,
-  ): PermissionDecisionPayload | null {
-    if (!result.ok || !result.decision || !result.decidedAt) {
-      return null;
-    }
-    const payload: PermissionDecisionPayload = {
-      permissionRequestId,
-      decision: result.decision,
-      decidedAt: result.decidedAt,
-    };
-    if (jobId !== undefined) {
-      payload.jobId = jobId;
-    }
-    return payload;
-  }
+  toDecisionPayload(result: GateDecisionResult, permissionRequestId: string, jobId?: string | null): PermissionDecisionPayload | null { return projectPermissionDecision(result, permissionRequestId, jobId); }
 
   /**
    * 导出可落盘快照。
    *
    * @returns dump
    */
-  dump(): {
-    requests: GatePermissionRequest[];
-    queueStatus: Array<[string, PermissionQueueStatus]>;
-    grants: PermissionGrantRecord[];
-    grantSeq: number;
-  } {
-    return {
-      requests: [...this.#requests.values()].map((item) => ({
-        ...item,
-        requestedPermissions: [...item.requestedPermissions],
-        proposedScope: { ...item.proposedScope },
-      })),
-      queueStatus: [...this.#queueStatus.entries()],
-      grants: this.#grants.map((item) => ({ ...item })),
-      grantSeq: this.#grantSeq,
-    };
-  }
+  dump(): PermissionGateSnapshot { return snapshotPermissionGate(this.#requests, this.#queueStatus, this.#grants, this.#grantSeq); }
 
   /**
    * 从快照恢复。
    *
    * @param dump 快照
    */
-  hydrate(dump: {
-    requests?: GatePermissionRequest[];
-    queueStatus?: Array<[string, PermissionQueueStatus]>;
-    grants?: PermissionGrantRecord[];
-    grantSeq?: number;
-  }): void {
-    this.#requests.clear();
-    for (const request of dump.requests ?? []) {
-      this.#requests.set(request.permissionRequestId, request);
-    }
-    this.#queueStatus = new Map(dump.queueStatus ?? []);
-    this.#grants = (dump.grants ?? []).map((item) => ({ ...item }));
-    this.#grantSeq = dump.grantSeq ?? 0;
+  hydrate(dump: Partial<PermissionGateSnapshot>): void {
+    const restored = restorePermissionGate(dump);
+    this.#requests = restored.requests;
+    this.#queueStatus = restored.queueStatus;
+    this.#grants = restored.grants;
+    this.#grantSeq = restored.grantSeq;
+  }
+
+  /**
+   * 事务取消围栏生效后撤销 job 的所有授予和 pending。
+   * @param jobId 被取消的 job
+   */
+  revokeForJob(jobId: string): void {
+    this.expirePendingForJob(jobId);
+    this.#grants = this.#grants.filter((grant) => grant.jobId !== jobId);
+    this.#onChange?.();
   }
 
   /**
@@ -307,12 +251,7 @@ export class PermissionGate {
    * @returns 是否存在 pending
    */
   hasPendingForJob(jobId: string): boolean {
-    for (const [id, request] of this.#requests) {
-      if (request.jobId === jobId && this.#queueStatus.get(id) === "pending") {
-        return true;
-      }
-    }
-    return false;
+    return pendingRequestIds(this.#requests, this.#queueStatus, (request) => request.jobId === jobId).length > 0;
   }
 
   /**
@@ -321,23 +260,7 @@ export class PermissionGate {
    * @returns permissionRequestId 列表
    */
   listDecidedGrantableRequestIds(): string[] {
-    const ids: string[] = [];
-    for (const [permissionRequestId, status] of this.#queueStatus) {
-      if (status !== "decided") {
-        continue;
-      }
-      const request = this.#requests.get(permissionRequestId);
-      if (!request?.jobId) {
-        continue;
-      }
-      const allGranted = request.requestedPermissions.every((permissionId) =>
-        this.hasGrant(request.jobId!, permissionId as PermissionId),
-      );
-      if (allGranted) {
-        ids.push(permissionRequestId);
-      }
-    }
-    return ids;
+    return grantableRequestIds(this.#requests, this.#queueStatus, (jobId, permission) => this.hasGrant(jobId, permission));
   }
 
   /**
@@ -396,17 +319,4 @@ export class PermissionGate {
     this.#grantSeq += 1;
     return `grant_${this.#grantSeq}_${createPermissionRequestId().slice(5, 13)}`;
   }
-}
-
-/**
- * @param request 请求
- * @returns 范围摘要
- */
-function summarizeScope(request: GatePermissionRequest): string {
-  const perms = request.requestedPermissions.join(" · ");
-  const root = request.proposedScope.workspaceRoot;
-  if (root) {
-    return `${perms} · ${root}`;
-  }
-  return perms;
 }

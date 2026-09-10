@@ -7,6 +7,7 @@
  */
 
 export { PROTOCOL_VERSION, type ProtocolVersion } from "./protocol-version.js";
+export { PERMISSION_INTENT_TEXT_RULES, permissionInferenceText } from "./states/permission/intent-text.js";
 
 export {
   createAttachId,
@@ -28,6 +29,7 @@ export {
 
 export {
   AFFAIR_STATUSES,
+  AFFAIR_TRANSITIONS,
   canTransitionAffairStatus,
   isAffairStatus,
   type AffairStatus,
@@ -35,6 +37,7 @@ export {
 
 export {
   JOB_STATUSES,
+  JOB_TRANSITIONS,
   canTransitionJobStatus,
   isJobStatus,
   type JobStatus,
@@ -73,6 +76,8 @@ export {
 export type { EndpointKind, ProtocolEndpoint, ProtocolEnvelope } from "./messages/envelope.js";
 export { MESSAGE_TYPES, isMessageType, type MessageType } from "./messages/message-type.js";
 export { createEnvelope, type CreateEnvelopeInput } from "./messages/create-envelope.js";
+export type { AffairActionResult, ProtocolResultAck, ProtocolAckSuccess, ProtocolAckFailure } from "./messages/result-ack.js";
+export { validateProtocolResultAck } from "./validators/result-ack.js";
 export {
   COMPANION_FC_CATALOG,
   COMPANION_FC_NAMES,
@@ -143,3 +148,8 @@ export {
 export function getProtocolPackageName(): string {
   return "@lanxin-claw/protocol";
 }
+
+export type { AffairClosePayload } from "./messages/affair-action.js";
+export { validateAffairClosePayload } from "./validators/payloads/affair-job/close.js";
+
+export { validateAffairActionResult } from "./validators/payloads/affair-job/action-result.js";

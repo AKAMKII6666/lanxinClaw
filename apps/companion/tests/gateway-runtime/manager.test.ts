@@ -81,7 +81,7 @@ test("子进程提前退出时 start 抛错", async () => {
 });
 
 test("DEFAULT_STARTUP_TIMEOUT_MS 覆盖冷启动余量", () => {
-  assert.equal(DEFAULT_STARTUP_TIMEOUT_MS, 90_000);
+  assert.equal(DEFAULT_STARTUP_TIMEOUT_MS, 300_000);
 });
 
 test("仅 TCP 可连但无 ready 日志时不视为就绪", async () => {

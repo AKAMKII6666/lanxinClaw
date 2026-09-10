@@ -12,6 +12,7 @@ import type { MessageType } from "../messages/message-type.js";
 export type SchemaFileName =
   | "envelope.schema.json"
   | "affair.schema.json"
+  | "affair-close.schema.json"
   | "job.schema.json"
   | "job-cancel.schema.json"
   | "pairing.schema.json"
@@ -37,7 +38,7 @@ export const MESSAGE_PAYLOAD_SCHEMA: Record<MessageType, SchemaFileName> = {
   "affair.create": "affair.schema.json",
   "affair.update": "affair.schema.json",
   "affair.resume": "affair.schema.json",
-  "affair.close": "affair.schema.json",
+  "affair.close": "affair-close.schema.json",
   "job.create": "job.schema.json",
   "job.accepted": "job.schema.json",
   "job.progress": "job.schema.json",

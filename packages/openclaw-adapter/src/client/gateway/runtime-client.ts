@@ -41,6 +41,8 @@ export interface GatewayRuntimeClientOptions {
   transport?: GatewayTransport;
   /** 单次 run 超时毫秒 */
   timeoutMs?: number;
+  /** 自托管 Gateway owner 的跨连接取消；只作用于取消控制面，不是 job 权限。 */
+  allowAdminAbort?: boolean;
 }
 
 /**
@@ -84,7 +86,7 @@ export function createGatewayRuntimeClient(
         scopes,
         authProvider: options.authProvider,
         runId,
-        context,
+        ...(context !== undefined ? { context } : {}),
       });
     },
 
@@ -95,7 +97,7 @@ export function createGatewayRuntimeClient(
         scopes,
         authProvider: options.authProvider,
         runId,
-        context,
+        ...(context !== undefined ? { context } : {}),
       });
     },
   };
@@ -118,6 +120,7 @@ function resolveTransport(
       gatewayUrl,
       authProvider: options.authProvider,
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.allowAdminAbort !== undefined ? { allowAdminAbort: options.allowAdminAbort } : {}),
     });
   }
   return createUnavailableGatewayTransport(
