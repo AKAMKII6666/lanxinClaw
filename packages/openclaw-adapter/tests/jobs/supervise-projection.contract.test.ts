@@ -126,6 +126,40 @@ describe("supervise projection / empty completed gate", () => {
     assert.equal(next.statusReasonCode, "openclaw.terminal_without_result");
   });
 
+  it("新闻搜索最终答复含事实摘要时 completed + present", () => {
+    const job = {
+      ...baseJob("running"),
+      goal: "打开浏览器，搜索最近关于尼泊尔泥石流的新闻，并汇总关键信息。",
+      allowedPermissions: ["network.access", "desktop.control"],
+    };
+    const digest =
+      "根据浏览器搜索到的最新新闻，以下是尼泊尔泥石流灾害的关键信息汇总：\n" +
+      "- 灾害造成 1385人遇难，约 5130人失联。\n" +
+      "- 9月以来持续强降雨引发多地泥石流和洪水。\n" +
+      "- 救援部门正在疏散受影响居民，并持续发布后续报道。";
+    const next = applyRunSnapshotToJob(job, {
+      runId: "run_apply",
+      status: "completed",
+      evidence: {
+        runId: "run_apply",
+        observedAt: "2026-09-12T00:37:00.000Z",
+        wait: { status: "ok", endedAt: "2026-09-12T00:37:00.000Z" },
+        lifecycle: { endedAt: "2026-09-12T00:37:00.000Z", terminalPhase: "end" },
+        toolFindings: [
+          { toolName: "browser.open", status: "succeeded", summary: "browser page opened" },
+          { toolName: "read", status: "succeeded", summary: "read news page content" },
+        ],
+        finalReply: { text: digest, source: "history", confidence: "medium" },
+        sourceStatuses: ["ok", "completed"],
+      },
+    });
+
+    assert.equal(next.status, "completed");
+    assert.equal(next.evidenceQuality, "present");
+    assert.match(next.resultDigest ?? "", /尼泊尔泥石流/);
+    assert.notEqual(next.statusReasonCode, "openclaw.terminal_without_result");
+  });
+
   it("单词语 passed 不得抬到 evidenceQuality=present", () => {
     const next = applyRunSnapshotToJob(baseJob("running"), {
       runId: "run_apply",

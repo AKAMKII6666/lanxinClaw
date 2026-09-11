@@ -290,4 +290,72 @@ describe("compound affair/job/permission state contract", () => {
     assert.equal(backend.getPermissionGate().getQueueStatus("perm_cancel_compound"), "expired");
     assert.equal(backend.listPendingPermissionCards().length, 0);
   });
+
+  it("affair.cancel 对已结束的 blocked job 可直接形成关闭确认", async () => {
+    const sent: ProtocolEnvelope[] = [];
+    let cancelCalls = 0;
+    const backend = createCompanionBackendRuntime({ desktopDeviceId: "desktop_cancel_blocked" });
+    assert.equal(backend.applyProtocolEnvelope(createEnvelope({
+      source: { kind: "phone", deviceId: "phone_cancel_blocked" },
+      target: { kind: "companion", deviceId: "desktop_cancel_blocked" },
+      type: "affair.create",
+      payload: {
+        affairId: "affair_cancel_blocked",
+        title: "取消已结束阻塞事务",
+        ownerAgent: "zhang-boss",
+        status: "ready",
+        context: [],
+        acceptanceCriteria: ["返回结果"],
+      },
+    })).ok, true);
+    assert.equal(backend.applyProtocolEnvelope(createEnvelope({
+      source: { kind: "companion", deviceId: "desktop_cancel_blocked" },
+      target: { kind: "phone", deviceId: "phone_cancel_blocked" },
+      type: "job.needs_permission",
+      payload: {
+        jobId: "job_cancel_blocked",
+        affairId: "affair_cancel_blocked",
+        executor: "openclaw",
+        status: "needs_permission",
+        goal: "搜索新闻",
+        allowedPermissions: ["network.access"],
+        progressSummary: "",
+      },
+    })).ok, true);
+    assert.equal(backend.applyProtocolEnvelope(createEnvelope({
+      source: { kind: "companion", deviceId: "desktop_cancel_blocked" },
+      target: { kind: "phone", deviceId: "phone_cancel_blocked" },
+      type: "job.blocked",
+      payload: {
+        jobId: "job_cancel_blocked",
+        affairId: "affair_cancel_blocked",
+        executor: "openclaw",
+        status: "blocked",
+        goal: "搜索新闻",
+        allowedPermissions: ["network.access"],
+        progressSummary: "OpenClaw 已结束，但没有返回可验收的任务结果",
+        blockedReason: "OpenClaw 已结束，但没有返回可验收的任务结果",
+        statusReasonCode: "openclaw.terminal_without_result",
+      },
+    })).ok, true);
+
+    const result = await backend.getAffairActions().execute({
+      actorId: "phone_cancel_blocked",
+      requestId: "cancel_blocked",
+      command: { affairId: "affair_cancel_blocked", status: "canceled", expectedCurrentJobId: "job_cancel_blocked" },
+    }, {
+      desktopDeviceId: "desktop_cancel_blocked",
+      cancelJob: () => {
+        cancelCalls += 1;
+        throw new Error("adapter cancel should not be required");
+      },
+      sendEnvelope: (envelope) => { sent.push(envelope); },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(cancelCalls, 0);
+    assert.equal(sent[0]?.type, "affair.close");
+    assert.equal(backend.getState().jobs.get("job_cancel_blocked")?.status, "canceled");
+    assert.equal(backend.getState().affairs.get("affair_cancel_blocked")?.status, "canceled");
+  });
 });

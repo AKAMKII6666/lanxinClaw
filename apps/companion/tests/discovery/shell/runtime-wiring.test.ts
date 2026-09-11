@@ -59,6 +59,15 @@ function readPairedPhoneIds(service: MdnsServiceSnapshot): string[] {
   return decoded.ok ? decoded.value.pairedPhoneIds : [];
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs = 200): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(predicate(), true);
+}
+
 describe("shell runtime wiring", () => {
   it("mDNS 广告发布 active paired phone ids，并可刷新", async () => {
     const transport = createCapturingTransport();
@@ -87,6 +96,31 @@ describe("shell runtime wiring", () => {
 
     await handle.stop();
     assert.equal(transport.stopped.length, 2);
+    assert.equal(transport.destroyed, true);
+  });
+
+  it("mDNS 广告会周期刷新，避免手机错过一次性广播后找不到电脑", async () => {
+    const transport = createCapturingTransport();
+    const handle = await startShellLanDiscovery({
+      enabled: true,
+      protocolPort: 61758,
+      desktopDeviceId: "desktop_a",
+      selectInterface: () => ({
+        ok: true,
+        candidate: { name: "Wi-Fi", address: "192.168.1.3" },
+      }),
+      createTransport: () => transport,
+      getPairedPhoneIds: () => ["phone_a"],
+      refreshIntervalMs: 15,
+      logger: createSilentLogger(),
+      onResult: () => undefined,
+    });
+
+    assert.ok(handle);
+    await waitFor(() => transport.published.length >= 2);
+    assert.deepEqual(readPairedPhoneIds(transport.published[1]!), ["phone_a"]);
+
+    await handle.stop();
     assert.equal(transport.destroyed, true);
   });
 });

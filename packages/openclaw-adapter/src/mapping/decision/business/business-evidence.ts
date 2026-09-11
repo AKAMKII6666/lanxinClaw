@@ -33,7 +33,15 @@ const PRICE_ENTITY_RE =
   /(?:\$\s?\d+(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:USD|USDT|CNY|人民币)|(?:当前)?价格[:：]\s*\$?\s*\d|(?:current\s+)?price[:：]\s*\$?\s*\d)/i;
 
 /** 查价/查资料目标语境。 */
-const RESEARCH_GOAL_RE = /(?:价格|报价|查价|查资料|搜新闻|币价|price|bnb|btc|eth|usd)/i;
+const RESEARCH_GOAL_RE = /(?:价格|报价|查价|查资料|搜新闻|搜索|查找|新闻|汇总|浏览器|网页|research|news|search|browser|price|bnb|btc|eth|usd)/i;
+
+/** 新闻/资料摘要中的事实实体。 */
+const RESEARCH_FACT_ENTITY_RE =
+  /(?:\d{2,4}\s*年|\d{1,2}\s*月|\d{1,2}\s*日|\d+(?:,\d{3})*(?:\.\d+)?\s*(?:人|名|起|次|%|公里|米|小时|天)|遇难|死亡|失联|受伤|疏散|救援|灾害|灾情|报道|来源|according|reported|killed|missing|injured|evacuated)/i;
+
+/** 新闻/资料摘要结构标题。 */
+const RESEARCH_REPORT_HEADER_RE =
+  /(?:关键信息|关键事实|新闻|报道|汇总|摘要|要点|信息如下|summary|report|sources?)/i;
 
 /** 桌面/图标清单标题与语义。 */
 const DESKTOP_LIST_HEADER_RE =
@@ -139,7 +147,36 @@ function tryPresentClassification(text: string, goal?: string | null): BusinessE
       return present(text, kind, reason);
     }
   }
+  const researchHit = tryPresentFromResearchSummary(text, goal);
+  if (researchHit) {
+    return researchHit;
+  }
   return tryPresentFromBulletList(text, goal);
+}
+
+/**
+ * 研究/新闻目标的最终答复：要求目标匹配，且文本具备摘要结构和事实实体。
+ *
+ * @param text 已脱敏文本
+ * @param goal 可选任务目标
+ * @returns present 分类或 null
+ */
+function tryPresentFromResearchSummary(
+  text: string,
+  goal?: string | null,
+): BusinessEvidenceClassification | null {
+  const goalText = safeText(goal ?? "");
+  if (!RESEARCH_GOAL_RE.test(goalText)) {
+    return null;
+  }
+  const hasStructure =
+    RESEARCH_REPORT_HEADER_RE.test(text) ||
+    MULTI_BULLET_LIST_RE.test(text) ||
+    bulletItemCount(text) >= 3;
+  if (hasStructure && text.length >= 80 && RESEARCH_FACT_ENTITY_RE.test(text)) {
+    return present(text, "count_result", "research_goal_with_factual_summary");
+  }
+  return null;
 }
 
 /**

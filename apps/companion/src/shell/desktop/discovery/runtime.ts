@@ -19,6 +19,7 @@ export interface ShellLanDiscoveryDeps {
   getPairedPhoneIds?: () => Promise<string[]> | string[];
   selectInterface?: () => LanMdnsInterfaceSelection;
   createTransport?: (options: { interfaceAddress: string }) => MdnsTransport;
+  refreshIntervalMs?: number;
   logger: Logger;
   onResult: (result: { lanDiscoveryReady: boolean; recentServerErrorCode?: string }) => void;
 }
@@ -30,6 +31,8 @@ interface ShellLanDiscoveryState {
   mdnsInterface: SelectedLanMdnsInterface;
   transport: MdnsTransport;
   currentStop: (() => Promise<void>) | null;
+  refreshTimer: ReturnType<typeof setInterval> | null;
+  refreshInFlight: boolean;
   closed: boolean;
 }
 
@@ -60,6 +63,8 @@ export async function startShellLanDiscovery(
     transport,
     mdnsInterface: mdnsInterface.candidate,
     currentStop: null,
+    refreshTimer: null,
+    refreshInFlight: false,
     closed: false,
   };
   const initialOk = await publishShellLanDiscovery(state);
@@ -67,16 +72,49 @@ export async function startShellLanDiscovery(
     await transport.destroy();
     return null;
   }
+  armShellLanDiscoveryRefresh(state);
   return {
     refresh: async (pairedPhoneIds?: string[]) => {
       await publishShellLanDiscovery(state, pairedPhoneIds);
     },
     stop: async () => {
       state.closed = true;
+      stopShellLanDiscoveryRefresh(state);
       await stopCurrentDiscoveryPublication(state);
       await transport.destroy();
     },
   };
+}
+
+function armShellLanDiscoveryRefresh(state: ShellLanDiscoveryState): void {
+  const intervalMs = state.deps.refreshIntervalMs ?? 30000;
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return;
+  }
+  state.refreshTimer = setInterval(() => {
+    void refreshShellLanDiscoveryFromTimer(state);
+  }, intervalMs);
+  state.refreshTimer.unref?.();
+}
+
+function stopShellLanDiscoveryRefresh(state: ShellLanDiscoveryState): void {
+  if (!state.refreshTimer) {
+    return;
+  }
+  clearInterval(state.refreshTimer);
+  state.refreshTimer = null;
+}
+
+async function refreshShellLanDiscoveryFromTimer(state: ShellLanDiscoveryState): Promise<void> {
+  if (state.closed || state.refreshInFlight) {
+    return;
+  }
+  state.refreshInFlight = true;
+  try {
+    await publishShellLanDiscovery(state);
+  } finally {
+    state.refreshInFlight = false;
+  }
 }
 
 function selectShellLanMdnsInterface(deps: ShellLanDiscoveryDeps): LanMdnsInterfaceSelection {

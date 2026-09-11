@@ -2,7 +2,7 @@
  * 事务关闭权威：持久化意图、串行执行、持久化业务结果后才通知。
  * 不拥有 runtime 取消实现或网络连接；外部已生效的取消不回滚。
  */
-import { createEnvelope, validateAffairClosePayload, type AffairActionResult } from "@lanxin-claw/protocol";
+import { createEnvelope, validateAffairClosePayload, type AffairActionResult, type JobPayload } from "@lanxin-claw/protocol";
 import type { PermissionGate } from "../../permissions/gate/permission-gate.js";
 import type { CompanionBackendState } from "../../state/types.js";
 import { AffairOperationQueue } from "./serial.js";
@@ -107,7 +107,13 @@ export class AffairActionCoordinator {
     for (const job of children) gate.revokeForJob(job.jobId);
     this.deps.persist();
     for (const job of children) {
-      if (isTerminalJob(state.jobs.get(job.jobId)?.status ?? job.status)) continue;
+      const current = state.jobs.get(job.jobId) ?? job;
+      if (isTerminalJob(current.status)) continue;
+      if (this.canCloseEndedBlockedJob(current)) {
+        this.markJobCanceledByAffairClose(current);
+        this.deps.persist();
+        continue;
+      }
       if (!ports.cancelJob) throw new Error("执行器不可用，不能确认子 job 已停止");
       await ports.cancelJob({ affairId: job.affairId, jobId: job.jobId });
       if (!isTerminalJob(state.jobs.get(job.jobId)?.status ?? "")) {
@@ -115,6 +121,25 @@ export class AffairActionCoordinator {
       }
       this.deps.persist();
     }
+  }
+
+  private canCloseEndedBlockedJob(job: JobPayload): boolean {
+    return job.status === "blocked" && [
+      "openclaw.terminal_without_result",
+      "openclaw.final_reply_negative",
+      "openclaw.web_search_disabled",
+    ].includes(job.statusReasonCode ?? "");
+  }
+
+  private markJobCanceledByAffairClose(job: JobPayload): void {
+    this.deps.state.jobs.set(job.jobId, {
+      ...job,
+      status: "canceled",
+      progressSummary: job.progressSummary || "用户已取消事务",
+      blockedReason: null,
+      resumeCondition: null,
+      statusReasonCode: "lanxin.cancel_after_ended_blocked_job",
+    });
   }
 
   private commit(record: AffairActionRecord): AffairActionResult {
