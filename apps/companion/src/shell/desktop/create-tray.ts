@@ -29,6 +29,8 @@ export interface TrayMenuBuilder {
    * @returns 原生菜单对象
    */
   buildFromTemplate(items: TrayMenuItemSpec[]): unknown;
+  /** 移除或替换应用级菜单；正式版用于隐藏 Electron 默认菜单。 */
+  setApplicationMenu?(menu: unknown | null): void;
 }
 
 /**

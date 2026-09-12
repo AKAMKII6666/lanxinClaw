@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import { suppressPackagedApplicationMenu } from "../../src/shell/desktop/app-menu.js";
 import { createAppTray } from "../../src/shell/desktop/create-tray.js";
 import {
   createMainWindow,
@@ -49,13 +50,41 @@ describe("companion desktop shell basics", () => {
       iconsFromDir: desktopDir,
     });
     const options = calls[0] as {
+      autoHideMenuBar: boolean;
       icon?: string;
       webPreferences: { contextIsolation: boolean; nodeIntegration: boolean; sandbox: boolean };
     };
+    assert.equal(options.autoHideMenuBar, false);
     assert.equal(options.webPreferences.contextIsolation, true);
     assert.equal(options.webPreferences.nodeIntegration, false);
     assert.equal(options.webPreferences.sandbox, true);
     assert.match((options.icon ?? "").replace(/\\/g, "/"), /icons\/app\.png$/);
+  });
+
+  it("createMainWindow 可隐藏正式版菜单栏", async () => {
+    const calls: unknown[] = [];
+    class FakeWindow {
+      constructor(options: unknown) {
+        calls.push(options);
+      }
+      async loadFile(_filePath: string): Promise<void> {
+        return;
+      }
+      async loadURL(_url: string): Promise<void> {
+        return;
+      }
+      on(_event: "closed", _listener: () => void): void {
+        return;
+      }
+    }
+    await createMainWindow({
+      BrowserWindow: FakeWindow as never,
+      preloadPath: "/tmp/preload.cjs",
+      rendererHtmlPath: "/tmp/index.html",
+      hideMenuBar: true,
+    });
+    const options = calls[0] as { autoHideMenuBar: boolean };
+    assert.equal(options.autoHideMenuBar, true);
   });
 
   it("createMainWindow 优先 loadURL（开发期 Vite）", async () => {
@@ -114,6 +143,38 @@ describe("companion desktop shell basics", () => {
     assert.deepEqual(clicks, ["show", "quit"]);
     const labels = ((tray as FakeTray).menu as { items: Array<{ label: string }> }).items.map((item) => item.label);
     assert.deepEqual(labels, ["显示面板", "退出澜星 Claw"]);
+  });
+
+  it("打包态移除 Electron 默认应用菜单", () => {
+    let applicationMenu: unknown = "unset";
+    suppressPackagedApplicationMenu({
+      app: { isPackaged: true },
+      Menu: {
+        buildFromTemplate() {
+          return {};
+        },
+        setApplicationMenu(menu) {
+          applicationMenu = menu;
+        },
+      },
+    } as never);
+    assert.equal(applicationMenu, null);
+  });
+
+  it("开发态保留 Electron 默认应用菜单", () => {
+    let calls = 0;
+    suppressPackagedApplicationMenu({
+      app: { isPackaged: false },
+      Menu: {
+        buildFromTemplate() {
+          return {};
+        },
+        setApplicationMenu() {
+          calls += 1;
+        },
+      },
+    } as never);
+    assert.equal(calls, 0);
   });
 
   it("resolveBundledOpenClawEntry 自动发现随产品携带的 openclaw.mjs", () => {

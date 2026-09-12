@@ -1,7 +1,7 @@
 {
   "sourceRoots": ["apps", "packages", "scripts/quality"],
   "sourceExtensions": [".js", ".mjs", ".ts", ".tsx"],
-  "excludeDirNames": ["node_modules", ".git", ".release", "dist", "build", "release", ".next", "coverage", "fixtures"],
+  "excludeDirNames": ["node_modules", ".git", ".release", "dist", "build", "release", "release-verify", ".next", "coverage", "fixtures"],
   "strictContractDirs": [
     "packages/protocol/src",
     "packages/openclaw-adapter/src",

@@ -74,7 +74,7 @@ npm run dist:win
 
 This produces:
 
-- `apps/companion/release/LanxinClaw-Setup-0.1.0-x64.exe`
+- `apps/companion/release/LanxinClaw-Setup-0.1.1-x64.exe`
 - `apps/companion/release/SHA256SUMS.txt`
 - electron-builder metadata such as `latest.yml` when generated
 
@@ -95,8 +95,8 @@ npm run release:win:local
 Pushing a version tag triggers the Windows release workflow:
 
 ```bash
-git tag -a v0.1.0 -m "LanxinClaw v0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "LanxinClaw v0.1.1"
+git push origin v0.1.1
 ```
 
 The workflow runs `npm run quality`, builds the Windows x64 installer, writes checksums, and publishes a GitHub Release with the generated assets.

@@ -15,20 +15,13 @@
   ],
   "extraResources": [
     {
-      "from": "../../.release/runtime/openclaw",
-      "to": "openclaw"
-    },
-    {
-      "from": "../../.release/runtime/node",
-      "to": "node"
-    },
-    {
-      "from": "../../.release/runtime/openclaw-provider-seeds",
-      "to": "openclaw-provider-seeds"
-    },
-    {
-      "from": "../../.release/runtime/runtime-manifest.json",
-      "to": "runtime-manifest.json"
+      "from": "../../.release/runtime",
+      "filter": [
+        "openclaw/**/*",
+        "node/**/*",
+        "openclaw-provider-seeds/**/*",
+        "runtime-manifest.json"
+      ]
     }
   ],
   "win": {

@@ -34,6 +34,8 @@ export type BrowserWindowConstructor = new (options: {
   width: number;
   height: number;
   show: boolean;
+  /** 是否隐藏窗口菜单栏 */
+  autoHideMenuBar?: boolean;
   /** 窗口 / 任务栏图标路径；缺省随包 icons */
   icon?: string;
   webPreferences: {
@@ -58,6 +60,8 @@ export interface CreateMainWindowOptions {
   rendererUrl?: string;
   /** 含 icons/ 的目录；缺省取 preload 同目录 */
   iconsFromDir?: string;
+  /** 打包态隐藏 Electron 默认菜单栏 */
+  hideMenuBar?: boolean;
 }
 
 /**
@@ -91,6 +95,7 @@ export async function createMainWindow(
     width: 1280,
     height: 800,
     show: true,
+    autoHideMenuBar: options.hideMenuBar === true,
     ...(existsSync(iconPath) ? { icon: iconPath } : {}),
     webPreferences: {
       preload: options.preloadPath,

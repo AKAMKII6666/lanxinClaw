@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath,pathToFileURL } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
@@ -35,6 +35,14 @@ const QWEN_VERSION = "2026.7.1";
 const QWEN_TARBALL = `qwen-provider-${QWEN_VERSION}.tgz`;
 const QWEN_URL = `https://registry.npmjs.org/@openclaw/qwen-provider/-/${QWEN_TARBALL}`;
 const QWEN_INTEGRITY = "sha512-1UqH8MY0gGL8rtTEKBI/M4PEtSAuPNEs8DodJ7y752p3pE2BkIPed6Sm1RRJ+g1WfL0IxmTlkxdwZ8xXrdBhqw==";
+
+const OPENCLAW_RUNTIME_COMPAT_DEPS = [
+  {
+    package: "json5",
+    spec: "json5@2.2.3",
+    reason: "OpenClaw gateway startup imports dist/redact modules that require json5.",
+  },
+];
 
 const artifacts = [
   {
@@ -145,6 +153,25 @@ function prepareOpenClaw() {
       },
     },
   );
+  installOpenClawRuntimeCompatibilityDependencies(dest);
+}
+
+function installOpenClawRuntimeCompatibilityDependencies(openclawDir) {
+  for (const dep of OPENCLAW_RUNTIME_COMPAT_DEPS) {
+    if (hasInstalledPackage(openclawDir, dep.package)) {
+      continue;
+    }
+    console.log(`[prepare-runtime-win] runtime dependency patch: ${dep.spec}`);
+    run(
+      "npm",
+      ["install", "--no-save", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false", dep.spec],
+      { cwd: openclawDir },
+    );
+  }
+}
+
+function hasInstalledPackage(packageRoot, packageName) {
+  return fs.existsSync(path.join(packageRoot, "node_modules", ...packageName.split("/"), "package.json"));
 }
 
 function prepareNode() {
@@ -173,6 +200,11 @@ function writeManifest() {
         source: OPENCLAW_URL,
         integrity: OPENCLAW_INTEGRITY,
         entry: "openclaw/openclaw.mjs",
+        runtimeCompatibilityDependencies: OPENCLAW_RUNTIME_COMPAT_DEPS.map((dep) => ({
+          package: dep.package,
+          spec: dep.spec,
+          reason: dep.reason,
+        })),
       },
       node: {
         version: NODE_VERSION,
@@ -201,6 +233,7 @@ function verifyRuntimeLayout() {
     path.join(runtimeDir, "openclaw", "openclaw.mjs"),
     path.join(runtimeDir, "openclaw", "package.json"),
     path.join(runtimeDir, "openclaw", "node_modules"),
+    path.join(runtimeDir, "openclaw", "node_modules", "json5", "package.json"),
     path.join(runtimeDir, "node", "node.exe"),
     path.join(runtimeDir, "openclaw-provider-seeds", QWEN_TARBALL),
     path.join(runtimeDir, "runtime-manifest.json"),
@@ -218,6 +251,29 @@ function verifyOpenClawRuntime() {
     [path.join(runtimeDir, "openclaw", "openclaw.mjs"), "--version"],
     { cwd: path.join(runtimeDir, "openclaw") },
   );
+  verifyOpenClawStartupImports();
+}
+
+function verifyOpenClawStartupImports() {
+  const openclawDir = path.join(runtimeDir, "openclaw");
+  const distDir = path.join(openclawDir, "dist");
+  const redactModules = fs
+    .readdirSync(distDir)
+    .filter((name) => /^redact-.+\.js$/u.test(name));
+  if (redactModules.length === 0) {
+    throw new Error(`OpenClaw dist missing redact modules: ${path.relative(repoRoot, distDir)}`);
+  }
+  for (const moduleName of redactModules) {
+    run(
+      path.join(runtimeDir, "node", "node.exe"),
+      [
+        "--input-type=module",
+        "--eval",
+        `await import(${JSON.stringify(pathToFileURL(path.join(distDir, moduleName)).href)});`,
+      ],
+      { cwd: openclawDir },
+    );
+  }
 }
 
 function run(command, args, options = {}) {

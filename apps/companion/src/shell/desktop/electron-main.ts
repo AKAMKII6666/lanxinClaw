@@ -19,6 +19,7 @@ import { createLoggerRegistry,resolveLogDir,type LoggerRegistry } from "../../lo
 import { flushPendingContext } from "../../protocol-server/bridge-actions.js";
 import { startCompanionProtocolServer } from "../../protocol-server/server.js";
 import { createFileBackendMirrorStore } from "../../state/mirror/backend-mirror.js";
+import { suppressPackagedApplicationMenu } from "./app-menu.js";
 import { runShellBridgeAction } from "./bridge-outbound.js";
 import { createMainWindow,resolveDefaultUiPaths } from "./create-window.js";
 import { isE2eAutoApproveEnabled,startE2eAutoApprove } from "./e2e-auto-approve.js";
@@ -44,6 +45,7 @@ export async function startCompanionDesktopShell(
   options: StartCompanionShellOptions = {},
 ): Promise<void> {
   await electron.app.whenReady();
+  suppressPackagedApplicationMenu(electron);
   const userDataDir = electron.app.getPath?.("userData") ?? null;
   const logDir = options.logDir ?? resolveLogDir(process.env, userDataDir);
   const logRegistry: LoggerRegistry = await createLoggerRegistry({
@@ -287,6 +289,7 @@ export async function startCompanionDesktopShell(
   mainWindow = (await createMainWindow({
     BrowserWindow: electron.BrowserWindow,
     preloadPath,
+    hideMenuBar: electron.app.isPackaged === true,
     ...(options.rendererUrl
       ? { rendererUrl: options.rendererUrl }
       : { rendererHtmlPath }),
