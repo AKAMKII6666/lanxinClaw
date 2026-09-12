@@ -12,6 +12,8 @@
 export interface AffairListItemView {
   /** 事务 id */
   affairId: string;
+  /** 列表分组 */
+  groupLabel: "处理中" | "已结束";
   /** 标题 */
   title: string;
   /** 事务状态 */

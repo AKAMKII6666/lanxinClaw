@@ -161,7 +161,7 @@ describe("companion bridge host", () => {
   it("permission.decide 由 host gate 裁决；isGranted 不依赖 renderer 内存", () => {
     const host = new CompanionBridgeHost();
     assert.equal(host.listPendingPermissionCards().length, 1);
-    assert.equal(host.isPermissionGranted("job_fix_code_001", "workspace.write"), false);
+    assert.equal(host.isPermissionGranted("job_fix_code_001", "workspace.read"), false);
 
     const decided = host.submitAction({
       type: "permission.decide",
@@ -175,8 +175,8 @@ describe("companion bridge host", () => {
       assert.deepEqual(decided.pendingPermissionCards, []);
     }
     assert.equal(host.listPendingPermissionCards().length, 0);
-    assert.equal(host.isPermissionGranted("job_fix_code_001", "workspace.write"), true);
-    assert.equal(host.isPermissionGranted("job_fix_code_001", "workspace.write"), false);
+    assert.equal(host.isPermissionGranted("job_fix_code_001", "workspace.read"), true);
+    assert.equal(host.isPermissionGranted("job_fix_code_001", "workspace.read"), false);
 
     const missing = host.submitAction({
       type: "permission.decide",

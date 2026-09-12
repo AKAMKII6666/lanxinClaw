@@ -11,6 +11,9 @@ import type { OpenClawRuntimeClient } from "../client/runtime-client.js";
 import { applyRunSnapshotToJob } from "../mapping/apply-run-snapshot.js";
 import type { AdapterJobStore } from "./job-store.js";
 import type { AdapterJobResult } from "./job-types.js";
+import { validateRunSnapshotIdentity } from "../evidence/snapshot-identity.js";
+import { runtimeErrorResult } from "../client/runtime-error-result.js";
+import { canonicalizeGatewaySessionKey, toGatewaySessionKey } from "../client/gateway/session-key.js";
 
 const TERMINAL = new Set(["completed", "failed", "canceled"]);
 
@@ -55,23 +58,44 @@ export async function cancelAdapterJob(
       status: "canceled" as const,
       progressSummary: existing.progressSummary || "canceled_before_run",
       lastRunStatus: "cancelled",
+      statusReasonCode: "openclaw.cancel_before_run",
+      statusObservedAt: new Date().toISOString(),
+      lastEvidenceKind: "local.cancel_ack",
+      lastEvidenceStrength: "strong",
+      updatedAt: new Date().toISOString(),
     };
     store.set(job);
     return { ok: true, job };
   }
 
   try {
-    const snapshot = await runtime.cancelRun(existing.openclawRunId);
+    const sessionKey =
+      canonicalizeGatewaySessionKey(existing.openclawSessionKey, "main", existing.jobId) ??
+      toGatewaySessionKey(existing.jobId);
+    const snapshot = await runtime.cancelRun(existing.openclawRunId, {
+      jobId: existing.jobId,
+      affairId: existing.affairId,
+      sessionKey,
+    });
+    const identity = validateRunSnapshotIdentity(existing, snapshot);
+    if (!identity.ok) {
+      return {
+        ok: false,
+        code: "runtime_evidence_mismatch",
+        message: identity.message,
+        retryable: false,
+      };
+    }
     const job = applyRunSnapshotToJob(existing, snapshot);
     store.set(job);
     return { ok: true, job };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "cancel_run_failed";
+    const runtime = runtimeErrorResult(err, "runtime_cancel_failed", "cancel_run_failed");
     return {
       ok: false,
-      code: "runtime_cancel_failed",
-      message,
-      retryable: true,
+      code: runtime.code,
+      message: runtime.message,
+      retryable: runtime.retryable,
     };
   }
 }

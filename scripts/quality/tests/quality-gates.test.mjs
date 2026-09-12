@@ -88,6 +88,18 @@ test("structure gate rejects flat mixed-responsibility directories", async () =>
   assert.ok(result.errors.some((item) => item.ruleId === "STRUCT-004"));
 });
 
+test("strict structure fails warnings without changing the existing thresholds", async () => {
+  const root = await tempRepo();
+  await write(root, "packages/protocol/src/messages/long.ts", Array.from({ length: 251 }, (_, i) => `const item${i} = ${i};`).join("\n"));
+  const normal = await runStructureGate({ root });
+  const strict = await runStructureGate({ root, strict: true });
+  assert.equal(normal.errors.length, 0);
+  assert.equal(normal.warnings.length, 1);
+  assert.equal(normal.passed, true);
+  assert.equal(strict.passed, false);
+  assert.deepEqual(strict.violations, normal.violations);
+});
+
 test("comment gate rejects missing exported contract docs", async () => {
   const root = await tempRepo();
   await write(

@@ -3,7 +3,7 @@
  *
  * 职责：在 companion 接受 job 后模拟 progress / blocked / completed。
  * 不拥有：affair 用户验收关闭、真实命令执行、权限最终授予。
- * 副作用：定时更新 store 并通过 emit 推送协议事件；completed 只把 affair 推到 waiting_acceptance。
+ * 副作用：定时更新 store 并通过 emit 推送协议事件；execution completed 只把 affair 推到 waiting_acceptance。
  */
 
 import {
@@ -114,6 +114,16 @@ function transitionJob(job: JobPayload, to: JobPayload["status"]): JobPayload {
 }
 
 /**
+ * exploration job 只回传探测结果，不推进 affair 生命周期。
+ *
+ * @param job job 载荷
+ * @returns 是否为探索 job
+ */
+function isExplorationJob(job: JobPayload): boolean {
+  return job.purpose === "exploration";
+}
+
+/**
  * 启动 mock worker 异步状态机（fire-and-forget）。
  *
  * @param store 内存 store
@@ -163,7 +173,7 @@ async function runMockWorker(
   };
   store.jobs.set(jobId, running);
   const affair0 = store.affairs.get(running.affairId);
-  if (affair0) {
+  if (affair0 && !isExplorationJob(running)) {
     const nextAffair = transitionAffair(
       { ...affair0, currentJobId: jobId },
       "running",
@@ -212,7 +222,7 @@ async function finishBlocked(
   };
   store.jobs.set(jobId, blocked);
   const affair = store.affairs.get(blocked.affairId);
-  if (affair) {
+  if (affair && !isExplorationJob(blocked)) {
     const next = transitionAffair(
       {
         ...affair,
@@ -238,7 +248,7 @@ async function finishBlocked(
 }
 
 /**
- * 结束为 completed；affair 进入 waiting_acceptance，绝不 closed。
+ * 结束为 completed；execution affair 进入 waiting_acceptance，exploration 只回传 job.completed。
  *
  * @param store 内存 store
  * @param config 配置
@@ -261,7 +271,9 @@ async function finishCompleted(
   }
   const completed: JobPayload = {
     ...transitionJob(job, "completed"),
-    progressSummary: "mock worker 认为目标已完成，等待用户验收",
+    progressSummary: isExplorationJob(job)
+      ? "mock worker 已完成只读探索"
+      : "mock worker 认为目标已完成，等待用户验收",
     blockedReason: null,
     resumeCondition: null,
   };
@@ -269,7 +281,7 @@ async function finishCompleted(
   emitJob(config, phoneDeviceId, "job.completed", completed, correlationId, emit);
 
   const affair = store.affairs.get(completed.affairId);
-  if (!affair) {
+  if (!affair || isExplorationJob(completed)) {
     return;
   }
   const waiting = transitionAffair(

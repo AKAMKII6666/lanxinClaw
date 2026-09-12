@@ -34,6 +34,7 @@ import {
   detectIllegalAutoClose,
 } from "../../apps/companion/src/supervision/policy/acceptance.js";
 import { createMemoryAuditStore } from "../../apps/companion/src/audit/memory-store.js";
+import { createSessionAuthProof } from "../../apps/companion/src/credentials/auth-proof.js";
 
 const PHONE_DEVICE_ID = "phone_sim_v13_001";
 const PHONE_DISPLAY_NAME = "模拟澜星电话 v1.3";
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
   const audit = createMemoryAuditStore();
   const mockRuntime = createMutableMockOpenClawRuntimeClient();
   const adapter = new OpenClawAdapter({ runtime: mockRuntime.client });
+  const workspaceRoot = process.cwd();
 
   const companion = await startMockCompanion({
     port: 0,
@@ -155,15 +157,19 @@ async function main(): Promise<void> {
         },
       }),
     );
-    await waitForEvent(events, (e) => e.type === "pairing.completed", 5_000);
+    const pairingCompleted = await waitForEvent(events, (e) => e.type === "pairing.completed", 5_000);
+    const pairingSecret = String((pairingCompleted.payload as { pairingSecret?: string }).pairingSecret ?? "");
+    if (!pairingSecret) {
+      throw new Error("pairing.completed 缺少 pairingSecret，不能构造 session.open authProof");
+    }
     audit.append({
       kind: "pairing",
       summary: "模拟电话完成双确认配对",
       outcome: "completed",
     });
 
-    const authProof = `mock-paired:${pairingId}`;
     const sessionId = createSessionId();
+    const authProof = createSessionAuthProof(pairingSecret, sessionId);
     sendEnvelope(
       ws,
       createEnvelope({
@@ -218,7 +224,7 @@ async function main(): Promise<void> {
           executor: "openclaw",
           status: "queued",
           goal: "e2e mock workspace",
-          workspaceHint: "F:/workspace/example",
+          workspaceHint: workspaceRoot,
           allowedPermissions: ["workspace.read", "command.run"],
           progressSummary: "",
           blockedReason: null,
@@ -228,6 +234,21 @@ async function main(): Promise<void> {
       }),
     );
 
+    await waitForEvent(events, (e) => e.type === "job.needs_permission", 5_000);
+    const permission = await waitForEvent(events, (e) => e.type === "permission.request", 5_000);
+    const permissionRequestId = (permission.payload as { permissionRequestId?: string }).permissionRequestId;
+    if (!permissionRequestId) {
+      throw new Error("permission.request 缺少 permissionRequestId");
+    }
+    const grant = await fetch(`${companion.baseUrl}/ui/permission-decide`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ permissionRequestId, decision: "allow_for_job" }),
+    });
+    if (!grant.ok) {
+      throw new Error(`mock permission decide failed: ${await grant.text()}`);
+    }
+    await waitForEvent(events, (e) => e.type === "permission.decision", 5_000);
     await waitForEvent(events, (e) => e.type === "job.accepted", 5_000);
     await waitForEvent(events, (e) => e.type === "job.progress", 5_000);
     await waitForEvent(events, (e) => e.type === "job.completed", 5_000);
@@ -288,7 +309,7 @@ async function main(): Promise<void> {
       jobId: adapterJobId,
       affairId,
       goal: "e2e adapter blocked scenario",
-      workspaceHint: "F:/workspace/example",
+      workspaceHint: workspaceRoot,
       allowedPermissions: ["workspace.read"],
     });
     if (!adapterJob.ok) {

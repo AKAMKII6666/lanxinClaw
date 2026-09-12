@@ -31,7 +31,7 @@ describe("device identity store", () => {
       phoneDeviceId: "phone_1",
       desktopDeviceId: "desktop_1",
       authProof,
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
     });
     assert.equal(auth.ok, true);
   });
@@ -51,7 +51,7 @@ describe("device identity store", () => {
       phoneDeviceId: "phone_2",
       desktopDeviceId: "desktop_2",
       authProof: "deadbeef",
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
     });
     assert.equal(auth.ok, false);
     if (!auth.ok) {
@@ -94,7 +94,7 @@ describe("device identity store", () => {
       phoneDeviceId: "phone_3",
       desktopDeviceId: "desktop_3",
       authProof: createSessionAuthProof(pairingSecret, "sess_3"),
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
     });
     assert.equal(auth.ok, false);
     if (!auth.ok) {
@@ -111,7 +111,7 @@ describe("device identity store", () => {
       phoneDeviceId: "unknown",
       desktopDeviceId: "desktop_x",
       authProof: "anything",
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
     });
     assert.equal(auth.ok, false);
     if (!auth.ok) {

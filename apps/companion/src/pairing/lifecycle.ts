@@ -7,76 +7,22 @@
  */
 
 import {
-  canTransitionPairingStatus,
-  createEnvelope,
-  createProtocolError,
-  type PairingChallengePayload,
-  type PairingCompletedPayload,
-  type PairingConfirmedPayload,
-  type PairingDesktopApprovedPayload,
-  type PairingRequestPayload,
-  type PairingRevokedPayload,
-  type ProtocolEnvelope,
-  type ProtocolError,
-  type PairingStatus,
+canTransitionPairingStatus,
+createEnvelope,
+createProtocolError,
+type PairingChallengePayload,
+type PairingCompletedPayload,
+type PairingConfirmedPayload,
+type PairingDesktopApprovedPayload,
+type PairingRequestPayload,
+type PairingRevokedPayload,
+type PairingStatus,
+type ProtocolEnvelope,
+type ProtocolError,
 } from "@lanxin-claw/protocol";
+import { createPairingSecret } from "../credentials/auth-proof.js";
 import { createPairingChallenge, verifyChallengeResponse } from "./challenge.js";
 import { createEmptyPairingSession, type PairingSession } from "./session.js";
-
-/** 出站消息回调 */
-export type EmitPairingEnvelope = (envelope: ProtocolEnvelope<any>) => void;
-
-/** 配对处理成功 */
-export interface PairingHandleOk {
-  /** 成功标记 */
-  ok: true;
-}
-
-/** 配对处理失败 */
-export interface PairingHandleErr {
-  /** 失败标记 */
-  ok: false;
-  /** 可经 wire 返回的协议错误；不得含凭据 */
-  error: ProtocolError;
-}
-
-/** 处理结果 */
-export type PairingHandleResult = PairingHandleOk | PairingHandleErr;
-
-/** 生命周期依赖 */
-export interface PairingLifecycleDeps {
-  /** 桌面设备 id */
-  desktopDeviceId: string;
-  /** 桌面展示名 */
-  desktopDisplayName: string;
-  /** challenge 有效期毫秒，默认 5 分钟 */
-  challengeTtlMs?: number;
-  /** 时钟（可测） */
-  now?: () => number;
-}
-
-/**
- * 尝试迁移会话状态；非法迁移返回错误。
- *
- * @param session 会话
- * @param to 目标状态
- * @returns 结果
- */
-function transition(session: PairingSession, to: PairingStatus): PairingHandleResult {
-  if (!canTransitionPairingStatus(session.status, to)) {
-    return {
-      ok: false,
-      error: createProtocolError(
-        "pairing_illegal_transition",
-        `pairing 状态不可从 ${session.status} 迁到 ${to}`,
-        false,
-        { from: session.status, to },
-      ),
-    };
-  }
-  session.status = to;
-  return { ok: true };
-}
 
 /**
  * 受理 pairing.request：进入 pairing_requested 并发出 challenge。
@@ -193,25 +139,13 @@ export function handlePhoneConfirmed(
 }
 
 /**
- * 构造可选 correlationId 入参，避免传入 null（exactOptionalPropertyTypes）。
- *
- * @param correlationId 可选关联
- * @returns 仅含定义时的字段
- */
-function optionalCorrelation(correlationId?: string): { correlationId?: string } {
-  if (correlationId === undefined) {
-    return {};
-  }
-  return { correlationId };
-}
-
-/**
  * 桌面用户批准：发出 desktop_approved 与 completed，进入 paired。
  *
  * @param deps 依赖
  * @param session 会话（须已 phone_confirmed）
  * @param emit 出站
  * @param correlationId 可选关联 id
+ * @param pairingSecret 可选注入共享秘密；缺省时生成新秘密
  * @returns 结果
  */
 export function approveDesktopPairing(
@@ -219,6 +153,7 @@ export function approveDesktopPairing(
   session: PairingSession,
   emit: EmitPairingEnvelope,
   correlationId?: string,
+  pairingSecret?: string,
 ): PairingHandleResult {
   if (session.status !== "phone_confirmed") {
     return {
@@ -260,11 +195,13 @@ export function approveDesktopPairing(
   session.pairedAt = approvedAt;
   session.challenge = null;
   session.expiresAt = null;
+  const secret = pairingSecret ?? createPairingSecret();
 
   const completed: PairingCompletedPayload = {
     pairingId: session.pairingId,
     phoneDeviceId: session.phoneDeviceId,
     desktopDeviceId: deps.desktopDeviceId,
+    pairingSecret: secret,
     pairedAt: approvedAt,
   };
   emit(
@@ -276,7 +213,7 @@ export function approveDesktopPairing(
       payload: completed,
     }),
   );
-  return { ok: true };
+  return { ok: true, pairingSecret: secret };
 }
 
 /**
@@ -352,3 +289,8 @@ export function revokeOrRejectPairing(
   session.expiresAt = null;
   return { ok: true };
 }
+
+import type { EmitPairingEnvelope, PairingHandleResult, PairingLifecycleDeps } from "./lifecycle/types.js";
+export type { EmitPairingEnvelope, PairingHandleErr, PairingHandleOk, PairingHandleResult, PairingLifecycleDeps } from "./lifecycle/types.js";
+
+import { optionalCorrelation, transition } from "./lifecycle/transition.js";

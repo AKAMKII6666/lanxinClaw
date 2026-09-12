@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://lanxing.local/schemas/session.schema.json",
   "title": "Lanxing Session Payloads",
-  "description": "session.* message payload shapes for protocol 0.1",
+  "description": "session.* message payload shapes for protocol 0.2",
   "oneOf": [
     { "$ref": "#/$defs/sessionOpen" },
     { "$ref": "#/$defs/sessionAccepted" },
@@ -33,7 +33,7 @@
         },
         "protocolVersion": {
           "type": "string",
-          "const": "0.1"
+          "const": "0.2"
         }
       },
       "additionalProperties": false

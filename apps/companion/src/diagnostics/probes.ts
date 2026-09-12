@@ -13,6 +13,8 @@ import type { DiagnosticReportView, DiagnosticProbeView } from "../ui/pages/diag
  * 诊断输入。
  */
 export interface BuildDiagnosticReportInput {
+  /** protocol server 是否监听 */
+  protocolServerReady?: boolean;
   /** Gateway URL；空表示未配置 */
   gatewayUrl?: string | null;
   /** Gateway 是否就绪 */
@@ -21,8 +23,20 @@ export interface BuildDiagnosticReportInput {
   lanDiscoveryReady?: boolean;
   /** secure storage 是否可用 */
   secureStorageReady?: boolean;
+  /** 最近 protocol/server 错误码 */
+  recentServerErrorCode?: string | null;
   /** 最近错误 */
   lastError?: DiagnosticReportView["lastError"];
+  /** OpenClaw web_search 是否 ready（配置级） */
+  openClawWebSearchReady?: boolean;
+  /** OpenClaw browser 是否 ready（配置级） */
+  openClawBrowserReady?: boolean;
+  /** OpenClaw 能力摘要文案；无密钥 */
+  openClawCapabilityDetail?: string | null;
+  /** 托管浏览器本地代理是否开启 */
+  browserProxyEnabled?: boolean;
+  /** 托管浏览器本地代理 URL */
+  browserProxyUrl?: string | null;
 }
 
 /**
@@ -33,13 +47,20 @@ export interface BuildDiagnosticReportInput {
  */
 export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): DiagnosticReportView {
   const services = [
-    probe("companion.service", "Companion service", "service", "ok", "running", null),
+    probe(
+      "companion.service",
+      "Companion service",
+      "service",
+      input.protocolServerReady === false ? "warn" : "ok",
+      input.protocolServerReady === false ? "protocol server not listening" : "running",
+      input.protocolServerReady === false ? "启动 desktop protocol server 后重试" : null,
+    ),
     probe(
       "openclaw.gateway",
       "OpenClaw Gateway",
       "service",
       input.gatewayReady ? "ok" : "warn",
-      input.gatewayUrl ? "configured" : "missing gateway url",
+      gatewayDetail(input),
       input.gatewayReady ? null : "配置并启动 OpenClaw Gateway 后重试",
     ),
     probe(
@@ -62,18 +83,51 @@ export function buildDiagnosticReport(input: BuildDiagnosticReportInput = {}): D
       input.lanDiscoveryReady ? "ready" : "not verified",
       "真实电话联调前需确认局域网发现",
     ),
+    ...openClawToolProbes(input),
   ] satisfies DiagnosticProbeView[];
-  const overallStatus = services.some((item) => item.status === "error") ? "error" : "warn";
+  if (input.recentServerErrorCode) {
+    services.push(probe(
+      "server.recent_error",
+      "Recent server error",
+      "service",
+      "warn",
+      input.recentServerErrorCode,
+      "查看 companion 日志定位最近协议或运行时错误",
+    ));
+  }
+  const overallStatus = summarizeOverallStatus([...services, ...environment]);
+  const browserProxy = {
+    enabled: input.browserProxyEnabled === true,
+    url: (input.browserProxyUrl?.trim() || "http://127.0.0.1:7890"),
+  };
   return {
-    schemaVersion: "0.1",
+    schemaVersion: "0.2",
     reportId: `diag_${Date.now()}`,
     generatedAt: new Date().toISOString(),
     overallStatus,
     services,
     environment,
     lastError: input.lastError ?? null,
-    copyText: `overall=${overallStatus}; gateway=${input.gatewayReady ? "ok" : "warn"}; node=${process.version}`,
+    browserProxy,
+    copyText: `overall=${overallStatus}; protocol=${input.protocolServerReady === false ? "warn" : "ok"}; gateway=${input.gatewayReady ? "ok" : "warn"}; node=${process.version}; browserProxy=${browserProxy.enabled ? "on" : "off"}`,
   };
+}
+
+function gatewayDetail(input: BuildDiagnosticReportInput): string {
+  if (input.gatewayReady) {
+    return `ready ${input.gatewayUrl ?? ""}`.trim();
+  }
+  return input.gatewayUrl ? "configured but not ready" : "missing gateway url";
+}
+
+function summarizeOverallStatus(items: readonly DiagnosticProbeView[]): DiagnosticReportView["overallStatus"] {
+  if (items.some((item) => item.status === "error")) {
+    return "error";
+  }
+  if (items.some((item) => item.status === "warn" || item.status === "unknown")) {
+    return "warn";
+  }
+  return "ok";
 }
 
 /**
@@ -88,6 +142,27 @@ function probe(
   hint: string | null,
 ): DiagnosticProbeView {
   return { probeId, label, category, status, detail, hint };
+}
+
+/**
+ * OpenClaw 工具能力探针（从主报告拆出以降复杂度）。
+ *
+ * @param input 诊断输入
+ * @returns probes
+ */
+function openClawToolProbes(input: BuildDiagnosticReportInput): DiagnosticProbeView[] {
+  // 产品主路径只展示电脑执行能力；不暴露 web_search 技术项。
+  const ready = Boolean(input.openClawBrowserReady);
+  return [
+    probe(
+      "openclaw.computer",
+      "电脑执行能力",
+      "environment",
+      ready ? "ok" : "warn",
+      ready ? "浏览器与桌面执行已就绪" : "浏览器能力未就绪",
+      ready ? null : "重启 Companion 以加载安装默认 browser；仍异常则查看复制诊断报告",
+    ),
+  ];
 }
 
 /**
@@ -107,4 +182,3 @@ function gitDetail(): string {
     return "git unavailable";
   }
 }
-

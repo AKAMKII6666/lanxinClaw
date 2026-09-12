@@ -187,12 +187,12 @@ export function validateChatReadReceiptPayload(
   if (!attachId.ok) {
     return attachId;
   }
-  if (chatMessageId.value === undefined && attachId.value === undefined) {
+  if ((chatMessageId.value === undefined) === (attachId.value === undefined)) {
     return {
       ok: false,
       error: {
         code: "validation_failed",
-        message: "read_receipt 须提供 chatMessageId 或 attachId",
+        message: "read_receipt 必须且只能提供一个 chatMessageId 或 attachId",
         retryable: false,
       },
     };

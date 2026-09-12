@@ -33,6 +33,7 @@ const AFFAIR_ID_ACTION_TYPES = new Set<string>([
   "affair.pause",
   "affair.resume",
   "affair.cancel",
+  "affair.requestRevision",
   "affair.requestAcceptance",
 ]);
 
@@ -53,6 +54,8 @@ type ActionCandidate = {
   type?: unknown;
   page?: unknown;
   affairId?: unknown;
+  expectedCurrentJobId?: unknown;
+  acceptanceSummary?: unknown;
   phoneDeviceId?: unknown;
   desktopDeviceId?: unknown;
   permissionRequestId?: unknown;
@@ -61,6 +64,8 @@ type ActionCandidate = {
   text?: unknown;
   target?: unknown;
   contentKind?: unknown;
+  enabled?: unknown;
+  url?: unknown;
 };
 
 /**
@@ -155,12 +160,31 @@ function isChatAction(typed: ActionCandidate): boolean {
 }
 
 /**
+ * 校验浏览器代理设置。
+ *
+ * @param typed 候选字段
+ * @returns 是否合法
+ */
+function isBrowserProxySettingsAction(typed: ActionCandidate): boolean {
+  return (
+    typed.type === "settings.setBrowserProxy" &&
+    typeof typed.enabled === "boolean" &&
+    typeof typed.url === "string"
+  );
+}
+
+/**
  * 校验带 payload 的复合白名单操作。
  *
  * @param typed 已确认含 type 字符串的候选
  * @returns 是否匹配
  */
 function matchesPayloadAction(typed: ActionCandidate & { type: string }): boolean {
+  if (typed.type === "affair.accept") {
+    return typeof typed.affairId === "string" && !!typed.affairId.trim() &&
+      typeof typed.expectedCurrentJobId === "string" && !!typed.expectedCurrentJobId.trim() &&
+      typeof typed.acceptanceSummary === "string" && !!typed.acceptanceSummary.trim();
+  }
   if (typed.type === "navigate") {
     return isNavigateAction(typed.page);
   }
@@ -169,7 +193,8 @@ function matchesPayloadAction(typed: ActionCandidate & { type: string }): boolea
     isDeviceAction(typed) ||
     isPermissionDecideAction(typed) ||
     isPairingDecideAction(typed) ||
-    isChatAction(typed)
+    isChatAction(typed) ||
+    isBrowserProxySettingsAction(typed)
   );
 }
 

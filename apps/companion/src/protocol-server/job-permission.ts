@@ -8,11 +8,15 @@
 
 import {
   createPermissionRequestId,
+  PERMISSION_IDS,
   type JobPayload,
   type PermissionId,
   type ProtocolEnvelope,
 } from "@lanxin-claw/protocol";
+import { enrichPermissionsForWebResearch } from "../gateway-runtime/openclaw-capability.js";
 import type { CompanionProtocolServerOptions } from "./server.js";
+
+const KNOWN_PERMISSION_ID_SET = new Set<string>(PERMISSION_IDS);
 
 /**
  * job.create 先入队 permission gate。
@@ -20,24 +24,19 @@ import type { CompanionProtocolServerOptions } from "./server.js";
 export function enqueueJobPermission(
   options: CompanionProtocolServerOptions,
   envelope: ProtocolEnvelope,
-): { ok: true } | { ok: false; code: string; message: string; retryable: false } {
+):
+  | { ok: true; permissionRequestId: string; request: ReturnType<typeof buildRequest> }
+  | { ok: false; code: string; message: string; retryable: false } {
   const payload = envelope.payload as unknown as JobPayload;
-  const requestedPermissions = normalizePermissions(payload.allowedPermissions);
-  const enqueued = options.backend.getPermissionGate().enqueue({
-    permissionRequestId: payload.permissionRequestId ?? createPermissionRequestId(),
-    jobId: payload.jobId,
-    affairId: payload.affairId,
-    requester: "zhang-boss",
-    requestedPermissions,
-    reason: payload.goal,
-    risk: riskForPermissions(requestedPermissions),
-    proposedScope: { ...(payload.workspaceHint ? { workspaceRoot: payload.workspaceHint } : {}) },
-    denyConsequence: "job 将停在 needs_permission，不会委派 OpenClaw 执行",
-    requestedAt: new Date().toISOString(),
-    expiresAt: null,
-  });
+  const validated = validatePermissions(payload.allowedPermissions ?? []);
+  if (!validated.ok) {
+    return validated;
+  }
+  const permissions = enrichPermissionsForWebResearch(validated.permissions, payload.goal);
+  const request = buildRequest(payload, permissions);
+  const enqueued = options.backend.getPermissionGate().enqueue(request);
   if (enqueued.ok) {
-    return { ok: true };
+    return { ok: true, permissionRequestId: request.permissionRequestId, request };
   }
   return {
     ok: false,
@@ -48,21 +47,72 @@ export function enqueueJobPermission(
 }
 
 /**
- * 过滤权限 id。
+ * 组装 gate 请求。
+ *
+ * @param payload job 载荷
+ * @param requestedPermissions 已过滤权限
+ * @returns 请求
  */
-function normalizePermissions(permissions: readonly string[]): PermissionId[] {
-  return permissions.filter((item): item is PermissionId =>
-    [
-      "workspace.read",
-      "workspace.write",
-      "command.run",
-      "network.access",
-      "git.read",
-      "git.write",
-      "secrets.read",
-      "desktop.control",
-    ].includes(item),
-  );
+function buildRequest(
+  payload: JobPayload,
+  requestedPermissions: PermissionId[],
+) {
+  return {
+    permissionRequestId: payload.permissionRequestId ?? createPermissionRequestId(),
+    jobId: payload.jobId,
+    affairId: payload.affairId,
+    requester: "zhang-boss" as const,
+    requestedPermissions,
+    reason: payload.goal,
+    risk: riskForPermissions(requestedPermissions),
+    proposedScope: { ...(payload.workspaceHint ? { workspaceRoot: payload.workspaceHint } : {}) },
+    denyConsequence: "拒绝授权会让该 job 失败，但不等于删除整件事务。",
+    requestedAt: new Date().toISOString(),
+    expiresAt: null,
+  };
+}
+
+/**
+ * 校验权限 id：含任一未知 id 即整单拒绝，不静默 strip。
+ *
+ * @param permissions 原始声明
+ * @returns 合法权限或错误
+ */
+export function validatePermissions(permissions: readonly string[]):
+  | { ok: true; permissions: PermissionId[] }
+  | { ok: false; code: string; message: string; retryable: false } {
+  const seen = new Set<string>();
+  const known: PermissionId[] = [];
+  const unknown: string[] = [];
+  for (const item of permissions) {
+    const text = String(item || "").trim();
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+    if (KNOWN_PERMISSION_ID_SET.has(text)) {
+      known.push(text as PermissionId);
+    } else {
+      unknown.push(text);
+    }
+  }
+  if (unknown.length > 0) {
+    return {
+      ok: false,
+      code: "unknown_permission_ids",
+      message: `job.create 含未知 allowedPermissions：${unknown.join(", ")}；未知 id 不得静默丢弃后继续`,
+      retryable: false,
+    };
+  }
+  if (known.length === 0) {
+    return {
+      ok: false,
+      code: "job_permissions_required",
+      message: "job.create 必须声明至少一个已知 allowedPermissions，空列表不得委派",
+      retryable: false,
+    };
+  }
+  return { ok: true, permissions: known };
 }
 
 /**

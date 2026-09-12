@@ -13,11 +13,35 @@ import { createDemoPermissionGate } from "../../src/permissions/gate/demo/create
 import { PermissionGate } from "../../src/permissions/gate/permission-gate.js";
 
 describe("permission gate", () => {
-  it("默认策略：workspace 需确认，secrets/desktop 默认拒绝桶", () => {
+  it("默认策略：执行权限 needs_confirm，secrets 默认拒绝，元能力 default_allow", () => {
     assert.equal(classifyPermissionPolicy("workspace.read"), "needs_confirm");
+    assert.equal(classifyPermissionPolicy("workspace.write"), "needs_confirm");
+    assert.equal(classifyPermissionPolicy("command.run"), "needs_confirm");
+    assert.equal(classifyPermissionPolicy("network.access"), "needs_confirm");
+    assert.equal(classifyPermissionPolicy("git.read"), "needs_confirm");
+    assert.equal(classifyPermissionPolicy("git.write"), "needs_confirm");
+    assert.equal(classifyPermissionPolicy("desktop.control"), "needs_confirm");
     assert.equal(classifyPermissionPolicy("secrets.read"), "default_deny");
-    assert.equal(classifyPermissionPolicy("desktop.control"), "default_deny");
     assert.equal(classifyPermissionPolicy("connection.status"), "default_allow");
+  });
+
+  it("pending 执行权限进入用户待确认卡片列表", () => {
+    const gate = new PermissionGate();
+    gate.enqueue({
+      permissionRequestId: "perm_ws",
+      jobId: "job_ws",
+      affairId: null,
+      requester: "zhang-boss",
+      requestedPermissions: ["workspace.read"],
+      reason: "读盘",
+      risk: "low",
+      proposedScope: {},
+      denyConsequence: "停",
+      requestedAt: "2026-07-23T00:00:00.000Z",
+      expiresAt: null,
+    });
+    assert.equal(gate.listPendingCards().length, 1);
+    assert.equal(gate.hasPendingForJob("job_ws"), true);
   });
 
   it("allow_once 授予后首次 check 消耗；deny 保持阻断", () => {
@@ -25,8 +49,9 @@ describe("permission gate", () => {
     const allow = gate.decide("perm_req_001", "allow_once", "2026-07-23T01:10:00.000Z");
     assert.equal(allow.ok, true);
     assert.equal(allow.actionBlocked, false);
-    assert.equal(gate.isGranted("job_fix_code_001", "workspace.write"), true);
-    assert.equal(gate.isGranted("job_fix_code_001", "workspace.write"), false);
+    assert.equal(gate.hasGrant("job_fix_code_001", "workspace.read"), true);
+    assert.equal(gate.isGranted("job_fix_code_001", "workspace.read"), true);
+    assert.equal(gate.isGranted("job_fix_code_001", "workspace.read"), false);
     assert.equal(gate.listPendingCards().length, 0);
 
     const gate2 = new PermissionGate();
@@ -46,6 +71,7 @@ describe("permission gate", () => {
     const denied = gate2.decide("perm_req_deny", "deny");
     assert.equal(denied.ok, true);
     assert.equal(denied.actionBlocked, true);
+    assert.equal(gate2.hasGrant("job_2", "command.run"), false);
     assert.equal(gate2.isGranted("job_2", "command.run"), false);
   });
 
@@ -53,8 +79,8 @@ describe("permission gate", () => {
     const gate = createDemoPermissionGate();
     const forJob = gate.decide("perm_req_001", "allow_for_job");
     assert.equal(forJob.ok, true);
-    assert.equal(gate.isGranted("job_fix_code_001", "workspace.write"), true);
-    assert.equal(gate.isGranted("job_fix_code_001", "workspace.write"), true);
+    assert.equal(gate.isGranted("job_fix_code_001", "workspace.read"), true);
+    assert.equal(gate.isGranted("job_fix_code_001", "workspace.read"), true);
 
     const gate2 = createDemoPermissionGate();
     const clarify = gate2.decide("perm_req_001", "require_more_context");

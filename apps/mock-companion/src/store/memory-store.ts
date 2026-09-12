@@ -19,8 +19,8 @@ export interface PairedDeviceState {
   phoneDeviceId: string;
   /** 电话展示名 */
   phoneDisplayName: string;
-  /** 可用于 session.open 的 mock authProof（非 API key） */
-  authProof: string;
+  /** 可用于 session.open HMAC 的配对秘密；不得展示或写审计 */
+  pairingSecret: string;
   /** 配对完成时间 */
   pairedAt: string;
 }

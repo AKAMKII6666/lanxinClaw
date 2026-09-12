@@ -18,12 +18,18 @@
     "test:companion": "npm run test -w @lanxin-claw/companion",
     "demo:low-risk-job": "npm run demo:low-risk -w @lanxin-claw/companion",
     "smoke:gateway": "tsx scripts/gateway/run-gateway-smoke.ts",
+    "logs:ls": "node scripts/logs/ls-logs.mjs",
+    "logs:tail": "node scripts/logs/tail-log.mjs",
     "e2e:real-companion": "tsx scripts/sim-phone/run-real-companion-loop.ts",
+    "e2e:live-browser": "tsx scripts/sim-phone/run-live-browser-e2e.ts",
     "e2e:v1.3": "npm run e2e:v1.3 -w @lanxin-claw/companion",
     "dev:companion": "npm run dev:shell -w @lanxin-claw/companion",
     "start:companion": "npm run start:shell -w @lanxin-claw/companion",
     "quality": "node scripts/quality/quality.mjs",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "sync:phone-contract": "tsx scripts/contracts/sync-phone-state-contract.ts",
+    "check:phone-contract": "tsx scripts/contracts/sync-phone-state-contract.ts --check",
+    "test:cross-repo": "npm run check:phone-contract && tsx --test scripts/cross-repo/*.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

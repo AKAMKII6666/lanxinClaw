@@ -1,0 +1,22 @@
+{
+  "protocolVersion": "0.2",
+  "messageId": "msg_permission_decision_001",
+  "correlationId": "msg_permission_request_001",
+  "sentAt": "2026-07-23T00:59:00.000Z",
+  "source": {
+    "kind": "companion",
+    "deviceId": "desktop_liao_pc"
+  },
+  "target": {
+    "kind": "phone",
+    "deviceId": "phone_lanxing_001"
+  },
+  "type": "permission.decision",
+  "payload": {
+    "permissionRequestId": "perm_req_001",
+    "jobId": "job_fix_code_001",
+    "decision": "allow_once",
+    "decidedAt": "2026-07-23T00:59:00.000Z",
+    "note": null
+  }
+}

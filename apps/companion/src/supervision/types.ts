@@ -42,6 +42,8 @@ export interface SupervisionSnapshot {
   jobId: string | null;
   /** worker 态；无 job 为 null */
   jobStatus: SupervisedJobStatus | null;
+  /** job 用途；exploration completed 不进入验收 */
+  jobPurpose?: "execution" | "exploration" | null;
   /** 进展摘要 */
   progressSummary: string;
   /** 已尝试步骤 */

@@ -39,7 +39,7 @@ describe("mock companion UI 视图 contract", () => {
       pairingId: "pair_ui",
       phoneDeviceId: "phone_ui",
       phoneDisplayName: "UI Phone",
-      authProof: "mock-paired:pair_ui",
+      pairingSecret: "mock-secret-pair-ui",
       pairedAt: "2026-07-23T00:00:00.000Z",
     };
     store.session = {

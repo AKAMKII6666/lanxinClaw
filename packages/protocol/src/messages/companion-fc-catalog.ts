@@ -12,14 +12,22 @@ import type { MessageType } from "./message-type.js";
  * 张老板 companion FC 稳定名称；与 docs/共同维护/技术设计/张老板伴侣工具.md 对齐。
  */
 export const COMPANION_FC_NAMES = [
+  "companion.get_connection_status",
+  "companion.discover_desktops",
+  "companion.prepare_desktop_connection",
+  "companion.confirm_desktop_connection",
+  "companion.disconnect_desktop",
+  "companion.explore_desktop",
   "companion.create_job",
   "companion.get_progress",
   "companion.pause_affair",
   "companion.resume_affair",
   "companion.cancel_job",
   "companion.cancel_affair",
+  "companion.accept_affair",
   "companion.send_chat_context",
   "companion.fetch_pending_context",
+  "companion.bind_message",
 ] as const;
 
 /** 张老板 companion FC 名称 */
@@ -43,8 +51,48 @@ export interface CompanionFcMapping {
 /** FC → 协议映射表；worker completed 不得经任何 FC 写成 affair.closed */
 export const COMPANION_FC_CATALOG: readonly CompanionFcMapping[] = [
   {
+    name: "companion.get_connection_status",
+    emits: [],
+    localOnly: true,
+    summary: "只读电话侧连接、配对与 session 状态",
+  },
+  {
+    name: "companion.discover_desktops",
+    emits: [],
+    localOnly: true,
+    summary: "mDNS 发现候选 companion；发现本身不建立信任",
+  },
+  {
+    name: "companion.prepare_desktop_connection",
+    emits: [],
+    localOnly: true,
+    summary: "把候选电脑绑定到短期连接意图，等待用户口头确认",
+  },
+  {
+    name: "companion.confirm_desktop_connection",
+    emits: [
+      "pairing.request",
+      "pairing.confirmed",
+      "session.open",
+    ],
+    localOnly: false,
+    summary: "用户口头确认后完成 pairing 或 session.open；仍不授予执行权限",
+  },
+  {
+    name: "companion.disconnect_desktop",
+    emits: ["session.closed"],
+    localOnly: false,
+    summary: "关闭当前 companion session；不撤销配对身份",
+  },
+  {
+    name: "companion.explore_desktop",
+    emits: ["affair.create", "job.create"],
+    localOnly: false,
+    summary: "创建澄清期只读 exploration job；不得当正式事务完成",
+  },
+  {
     name: "companion.create_job",
-    emits: ["job.create", "affair.update"],
+    emits: ["affair.create", "affair.update", "job.create"],
     localOnly: false,
     summary: "为 affair 委派 job；权限仍由 companion 裁决",
   },
@@ -74,9 +122,15 @@ export const COMPANION_FC_CATALOG: readonly CompanionFcMapping[] = [
   },
   {
     name: "companion.cancel_affair",
-    emits: ["job.cancel", "affair.close"],
+    emits: ["affair.close"],
     localOnly: false,
-    summary: "用户明确取消整件事务；不是验收通过",
+    summary: "携原请求 ID 请求原子取消事务；等待包含全部子任务的提交结果；不是验收通过",
+  },
+  {
+    name: "companion.accept_affair",
+    emits: ["affair.close"],
+    localOnly: false,
+    summary: "用户明确验收 waiting_acceptance 后关闭 affair",
   },
   {
     name: "companion.send_chat_context",
@@ -86,9 +140,15 @@ export const COMPANION_FC_CATALOG: readonly CompanionFcMapping[] = [
   },
   {
     name: "companion.fetch_pending_context",
+    emits: ["chat.read_receipt"],
+    localOnly: true,
+    summary: "查询收件箱与完整原文；交给通话后异步补送可重试的消费回执",
+  },
+  {
+    name: "companion.bind_message",
     emits: [],
     localOnly: true,
-    summary: "消费 pending chat.context_attach；realtime 注入的 FC fallback",
+    summary: "用户确认后将未归属消息绑定明确事务；不授予执行权限",
   },
 ] as const;
 

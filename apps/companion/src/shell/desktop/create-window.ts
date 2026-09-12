@@ -3,11 +3,13 @@
  *
  * 职责：创建 BrowserWindow 并加载 renderer；默认开启 contextIsolation。
  * 不拥有：pairing、权限裁决、OpenClaw；业务 IPC 由 bridge 注册。
- * 副作用：创建原生窗口；不直接访问文件系统/命令。
+ * 副作用：创建原生窗口；读取随包图标路径（existsSync），不访问用户工作区。
  */
 
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveAppIconPath } from "./tray-icon.js";
 
 /**
  * 最小 BrowserWindow 构造契约，便于单测注入而不强绑 electron 运行时。
@@ -18,7 +20,11 @@ export interface BrowserWindowLike {
   /** 加载开发期 Vite URL */
   loadURL(url: string): Promise<void>;
   /** 窗口关闭事件 */
-  on(event: "closed", listener: () => void): void;
+  on(event: "closed" | "close", listener: (event?: { preventDefault(): void }) => void): void;
+  /** 显示窗口 */
+  show?(): void;
+  /** 隐藏窗口 */
+  hide?(): void;
 }
 
 /**
@@ -28,6 +34,8 @@ export type BrowserWindowConstructor = new (options: {
   width: number;
   height: number;
   show: boolean;
+  /** 窗口 / 任务栏图标路径；缺省随包 icons */
+  icon?: string;
   webPreferences: {
     preload: string;
     contextIsolation: boolean;
@@ -48,6 +56,8 @@ export interface CreateMainWindowOptions {
   rendererHtmlPath?: string;
   /** 开发期 Vite URL；优先于 rendererHtmlPath */
   rendererUrl?: string;
+  /** 含 icons/ 的目录；缺省取 preload 同目录 */
+  iconsFromDir?: string;
 }
 
 /**
@@ -76,10 +86,12 @@ export function resolveDefaultUiPaths(metaUrl: string): {
 export async function createMainWindow(
   options: CreateMainWindowOptions,
 ): Promise<BrowserWindowLike> {
+  const iconPath = resolveAppIconPath(options.iconsFromDir ?? path.dirname(options.preloadPath));
   const win = new options.BrowserWindow({
     width: 1280,
     height: 800,
     show: true,
+    ...(existsSync(iconPath) ? { icon: iconPath } : {}),
     webPreferences: {
       preload: options.preloadPath,
       contextIsolation: true,

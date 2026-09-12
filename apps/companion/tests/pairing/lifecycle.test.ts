@@ -27,7 +27,7 @@ function requestEnvelope(pairingId: string): ProtocolEnvelope {
       pairingId,
       phoneDeviceId: "phone_001",
       phoneDisplayName: "Phone",
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
       capabilities: ["pairing.v1"],
     },
   });

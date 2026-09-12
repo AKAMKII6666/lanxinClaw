@@ -12,7 +12,7 @@ import List from "@mui/material/List";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemText from "@mui/material/ListItemText";
 import Typography from "@mui/material/Typography";
-import type { ReactElement } from "react";
+import { Fragment, type ReactElement } from "react";
 import { AFFAIR_STATUS_LABEL, labelOf } from "./tasks-labels.js";
 import type { AffairListItemView } from "./tasks-models.js";
 
@@ -35,32 +35,38 @@ export function TasksListPanel(props: {
 
   return (
     <List dense disablePadding>
-      {props.affairs.map((item) => (
-        <ListItemButton
-          key={item.affairId}
-          selected={item.affairId === props.selectedAffairId}
-          onClick={() => props.onSelect(item.affairId)}
-          sx={{ alignItems: "flex-start", mb: 1, border: 1, borderColor: "divider", borderRadius: 1 }}
-        >
-          <ListItemText
-            primary={
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-                <Chip
-                  size="small"
-                  label={labelOf(AFFAIR_STATUS_LABEL, item.status)}
-                  color={item.status === "blocked" ? "error" : "default"}
-                  sx={{ alignSelf: "flex-start" }}
-                />
-                <Typography variant="subtitle2">{item.title}</Typography>
-              </Box>
-            }
-            secondary={
-              item.blockedReason
-                ? `阻塞：${item.blockedReason}`
-                : `最近：${item.progressSummary}`
-            }
-          />
-        </ListItemButton>
+      {props.affairs.map((item, index) => (
+        <Fragment key={item.affairId}>
+          {index === 0 || props.affairs[index - 1]?.groupLabel !== item.groupLabel ? (
+            <Typography color="text.secondary" variant="caption" sx={{ display: "block", mt: index === 0 ? 0 : 1.5, mb: 0.5 }}>
+              {item.groupLabel}
+            </Typography>
+          ) : null}
+          <ListItemButton
+            selected={item.affairId === props.selectedAffairId}
+            onClick={() => props.onSelect(item.affairId)}
+            sx={{ alignItems: "flex-start", mb: 1, border: 1, borderColor: "divider", borderRadius: 1 }}
+          >
+            <ListItemText
+              primary={
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                  <Chip
+                    size="small"
+                    label={labelOf(AFFAIR_STATUS_LABEL, item.status)}
+                    color={item.status === "blocked" ? "error" : "default"}
+                    sx={{ alignSelf: "flex-start" }}
+                  />
+                  <Typography variant="subtitle2">{item.title}</Typography>
+                </Box>
+              }
+              secondary={
+                item.blockedReason
+                  ? `阻塞：${item.blockedReason}`
+                  : `最近：${item.progressSummary}`
+              }
+            />
+          </ListItemButton>
+        </Fragment>
       ))}
     </List>
   );

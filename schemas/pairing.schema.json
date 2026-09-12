@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://lanxing.local/schemas/pairing.schema.json",
   "title": "Lanxing Pairing Payloads",
-  "description": "pairing.* message payload shapes for protocol 0.1",
+  "description": "pairing.* message payload shapes for protocol 0.2",
   "oneOf": [
     { "$ref": "#/$defs/pairingRequest" },
     { "$ref": "#/$defs/pairingChallenge" },
@@ -30,7 +30,7 @@
         },
         "protocolVersion": {
           "type": "string",
-          "const": "0.1"
+          "const": "0.2"
         },
         "capabilities": {
           "type": "array",
@@ -105,7 +105,7 @@
     },
     "pairingCompleted": {
       "type": "object",
-      "required": ["pairingId", "phoneDeviceId", "desktopDeviceId", "pairedAt"],
+      "required": ["pairingId", "phoneDeviceId", "desktopDeviceId", "pairingSecret", "pairedAt"],
       "properties": {
         "pairingId": {
           "type": "string",
@@ -116,6 +116,10 @@
           "minLength": 1
         },
         "desktopDeviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pairingSecret": {
           "type": "string",
           "minLength": 1
         },

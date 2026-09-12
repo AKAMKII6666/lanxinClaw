@@ -2,16 +2,27 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://lanxing.local/schemas/chat.schema.json",
   "title": "Lanxing Chat Payloads",
-  "description": "chat.* message payload shapes for protocol 0.1；文本均为 untrusted input",
+  "description": "chat.* message payload shapes for protocol 0.2；文本均为 untrusted input",
   "oneOf": [
-    { "$ref": "#/$defs/chatMessage" },
-    { "$ref": "#/$defs/chatContextAttach" },
-    { "$ref": "#/$defs/chatReadReceipt" }
+    {
+      "$ref": "#/$defs/chatMessage"
+    },
+    {
+      "$ref": "#/$defs/chatContextAttach"
+    },
+    {
+      "$ref": "#/$defs/chatReadReceipt"
+    }
   ],
   "$defs": {
     "chatMessage": {
       "type": "object",
-      "required": ["chatMessageId", "text", "authorKind", "sentAt"],
+      "required": [
+        "chatMessageId",
+        "text",
+        "authorKind",
+        "sentAt"
+      ],
       "properties": {
         "chatMessageId": {
           "type": "string",
@@ -22,10 +33,17 @@
           "minLength": 1
         },
         "affairId": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "authorKind": {
-          "enum": ["user", "zhang-boss", "companion"]
+          "enum": [
+            "user",
+            "zhang-boss",
+            "companion"
+          ]
         },
         "sentAt": {
           "type": "string",
@@ -36,7 +54,13 @@
     },
     "chatContextAttach": {
       "type": "object",
-      "required": ["attachId", "text", "target", "contentKind", "sentAt"],
+      "required": [
+        "attachId",
+        "text",
+        "target",
+        "contentKind",
+        "sentAt"
+      ],
       "properties": {
         "attachId": {
           "type": "string",
@@ -47,13 +71,24 @@
           "minLength": 1
         },
         "target": {
-          "enum": ["active_call", "affair"]
+          "enum": [
+            "active_call",
+            "affair"
+          ]
         },
         "affairId": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "contentKind": {
-          "enum": ["path", "log", "url", "note"]
+          "enum": [
+            "path",
+            "log",
+            "url",
+            "note"
+          ]
         },
         "sentAt": {
           "type": "string",
@@ -65,9 +100,13 @@
         {
           "if": {
             "properties": {
-              "target": { "const": "affair" }
+              "target": {
+                "const": "affair"
+              }
             },
-            "required": ["target"]
+            "required": [
+              "target"
+            ]
           },
           "then": {
             "properties": {
@@ -76,14 +115,18 @@
                 "minLength": 1
               }
             },
-            "required": ["affairId"]
+            "required": [
+              "affairId"
+            ]
           }
         }
       ]
     },
     "chatReadReceipt": {
       "type": "object",
-      "required": ["readAt"],
+      "required": [
+        "readAt"
+      ],
       "properties": {
         "chatMessageId": {
           "type": "string",
@@ -99,9 +142,17 @@
         }
       },
       "additionalProperties": false,
-      "anyOf": [
-        { "required": ["chatMessageId"] },
-        { "required": ["attachId"] }
+      "oneOf": [
+        {
+          "required": [
+            "chatMessageId"
+          ]
+        },
+        {
+          "required": [
+            "attachId"
+          ]
+        }
       ]
     }
   }

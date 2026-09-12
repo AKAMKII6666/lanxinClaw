@@ -75,6 +75,9 @@ export function PermissionsPage(props: { bridge: RendererBridgeApi }): ReactElem
       <Typography variant="h5" sx={{ mb: 2 }}>
         权限
       </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        电脑工作（磁盘、命令行、浏览器、截图、Git）安装后默认允许。本页主要用于管理配对设备；仅极少数敏感权限会要求确认。
+      </Typography>
       {errorText ? (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErrorText(null)}>
           {errorText}

@@ -8,12 +8,17 @@
 
 import type {
   CreateOpenClawRunParams,
+  OpenClawRunContext,
   OpenClawRunSnapshot,
   OpenClawRuntimeClient,
 } from "../runtime-client.js";
 import type { GatewayTransport } from "./transport.js";
 import { createUnavailableGatewayTransport } from "./transport.js";
 import { createRawWebSocketGatewayTransport } from "./raw-ws/transport.js";
+import {
+  canonicalizeGatewaySessionKey,
+  toGatewaySessionKey,
+} from "./session-key.js";
 
 /**
  * Gateway 鉴权提供者；返回 token 或头信息由具体 transport 使用。
@@ -36,6 +41,8 @@ export interface GatewayRuntimeClientOptions {
   transport?: GatewayTransport;
   /** 单次 run 超时毫秒 */
   timeoutMs?: number;
+  /** 自托管 Gateway owner 的跨连接取消；只作用于取消控制面，不是 job 权限。 */
+  allowAdminAbort?: boolean;
 }
 
 /**
@@ -50,47 +57,122 @@ export function createGatewayRuntimeClient(
   const gatewayUrl = options.gatewayUrl?.trim() ?? "";
   const agentId = options.agentId.trim();
   const scopes = [...(options.defaultScopes ?? [])];
-  const transport =
-    options.transport ??
-    (gatewayUrl && options.authProvider
-      ? createRawWebSocketGatewayTransport({
-          gatewayUrl,
-          authProvider: options.authProvider,
-          ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-        })
-      : createUnavailableGatewayTransport(
-          "未注入 OpenClaw Gateway transport；请配置官方 gateway client 或 raw WS transport",
-        ));
+  const transport = resolveTransport(options, gatewayUrl);
 
   return {
     async createRun(params) {
-      validateGatewayOptions(gatewayUrl, agentId, scopes);
+      const runScopes = effectiveRunScopes(params.allowedPermissions, scopes);
+      validateGatewayOptions(gatewayUrl, agentId, runScopes);
       await assertAuthAvailable(options.authProvider);
-      const sessionKey = params.sessionKey?.trim() || "lanxing-job:unknown";
       return sanitizeSnapshot(
         await transport.createRun({
           agentId,
+          ...(params.jobId ? { jobId: params.jobId } : {}),
+          ...(params.affairId ? { affairId: params.affairId } : {}),
+          idempotencyKey: params.idempotencyKey ?? null,
           input: params.input,
-          sessionKey,
+          sessionKey: resolveCreateSessionKey(params, agentId),
           workspaceHint: params.workspaceHint ?? null,
-          scopes,
+          scopes: runScopes,
           timeoutMs: options.timeoutMs ?? null,
         }),
       );
     },
 
-    async getRun(runId) {
-      validateGatewayOptions(gatewayUrl, agentId, scopes);
-      await assertAuthAvailable(options.authProvider);
-      return sanitizeSnapshot(await transport.getRun(runId));
+    async getRun(runId, context) {
+      return invokeWithCanonicalSession(transport.getRun.bind(transport), {
+        gatewayUrl,
+        agentId,
+        scopes,
+        authProvider: options.authProvider,
+        runId,
+        ...(context !== undefined ? { context } : {}),
+      });
     },
 
-    async cancelRun(runId) {
-      validateGatewayOptions(gatewayUrl, agentId, scopes);
-      await assertAuthAvailable(options.authProvider);
-      return sanitizeSnapshot(await transport.cancelRun(runId));
+    async cancelRun(runId, context) {
+      return invokeWithCanonicalSession(transport.cancelRun.bind(transport), {
+        gatewayUrl,
+        agentId,
+        scopes,
+        authProvider: options.authProvider,
+        runId,
+        ...(context !== undefined ? { context } : {}),
+      });
     },
   };
+}
+
+/**
+ * @param options client 选项
+ * @param gatewayUrl 已 trim 的 URL
+ * @returns transport
+ */
+function resolveTransport(
+  options: GatewayRuntimeClientOptions,
+  gatewayUrl: string,
+): GatewayTransport {
+  if (options.transport) {
+    return options.transport;
+  }
+  if (gatewayUrl && options.authProvider) {
+    return createRawWebSocketGatewayTransport({
+      gatewayUrl,
+      authProvider: options.authProvider,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.allowAdminAbort !== undefined ? { allowAdminAbort: options.allowAdminAbort } : {}),
+    });
+  }
+  return createUnavailableGatewayTransport(
+    "未注入 OpenClaw Gateway transport；请配置官方 gateway client 或 raw WS transport",
+  );
+}
+
+/**
+ * @param params 创建 run 入参
+ * @param agentId agent id
+ * @returns Gateway 规范形态的 sessionKey
+ */
+function resolveCreateSessionKey(params: CreateOpenClawRunParams, agentId: string): string {
+  return (
+    canonicalizeGatewaySessionKey(params.sessionKey, agentId, params.jobId) ??
+    (params.jobId
+      ? toGatewaySessionKey(params.jobId, agentId)
+      : `agent:${agentId}:lanxing-job:unknown`)
+  );
+}
+
+/**
+ * get/cancel 共用：校验、鉴权、规范化 sessionKey。
+ *
+ * @param invoke transport 方法
+ * @param input 上下文
+ * @returns 快照
+ */
+async function invokeWithCanonicalSession(
+  invoke: (runId: string, context?: OpenClawRunContext) => Promise<OpenClawRunSnapshot>,
+  input: {
+    gatewayUrl: string;
+    agentId: string;
+    scopes: readonly string[];
+    authProvider: GatewayAuthProvider | undefined;
+    runId: string;
+    context?: OpenClawRunContext;
+  },
+): Promise<OpenClawRunSnapshot> {
+  validateGatewayOptions(input.gatewayUrl, input.agentId, input.scopes);
+  await assertAuthAvailable(input.authProvider);
+  const sessionKey = canonicalizeGatewaySessionKey(
+    input.context?.sessionKey,
+    input.agentId,
+    input.context?.jobId,
+  );
+  return sanitizeSnapshot(
+    await invoke(input.runId, {
+      ...input.context,
+      ...(sessionKey ? { sessionKey } : {}),
+    }),
+  );
 }
 
 /**
@@ -110,6 +192,13 @@ function validateGatewayOptions(gatewayUrl: string, agentId: string, scopes: rea
   if (scopes.length === 0) {
     throw new Error("gateway_scope_missing");
   }
+}
+
+function effectiveRunScopes(
+  jobPermissions: readonly string[] | undefined,
+  defaultScopes: readonly string[],
+): string[] {
+  return jobPermissions?.length ? [...jobPermissions] : [...defaultScopes];
 }
 
 /**
@@ -140,5 +229,6 @@ function sanitizeSnapshot(snapshot: OpenClawRunSnapshot): OpenClawRunSnapshot {
     ...(snapshot.summary !== undefined ? { summary: snapshot.summary } : {}),
     ...(snapshot.blockedReason !== undefined ? { blockedReason: snapshot.blockedReason } : {}),
     ...(snapshot.resumeCondition !== undefined ? { resumeCondition: snapshot.resumeCondition } : {}),
+    ...(snapshot.evidence !== undefined ? { evidence: snapshot.evidence } : {}),
   };
 }

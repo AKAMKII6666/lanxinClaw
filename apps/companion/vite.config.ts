@@ -15,6 +15,7 @@ const companionRoot = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root: path.join(companionRoot, "src", "ui"),
   base: "./",
+  publicDir: path.join(companionRoot, "src", "shell", "desktop", "icons"),
   plugins: [react()],
   server: {
     host: "127.0.0.1",

@@ -1,5 +1,5 @@
 {
-  "protocolVersion": "0.1",
+  "protocolVersion": "0.2",
   "messageId": "msg_job_blocked_001",
   "correlationId": "msg_job_create_001",
   "sentAt": "2026-07-22T00:05:00.000Z",
@@ -21,6 +21,15 @@
     "workspaceHint": "F:/workspace/xxx",
     "allowedPermissions": ["workspace.read", "command.run", "network.access"],
     "progressSummary": "Dependency installation was attempted three times.",
+    "recentSteps": [
+      {
+        "at": "2026-07-22T00:04:30.000Z",
+        "kind": "tool",
+        "text": "command.run: npm install failed; registry unreachable"
+      }
+    ],
+    "resultDigest": "The desktop cannot reach the package registry. Resume after network access is restored.",
+    "evidenceQuality": "weak",
     "blockedReason": "The desktop cannot reach the package registry. Resume after network access is restored."
   }
 }

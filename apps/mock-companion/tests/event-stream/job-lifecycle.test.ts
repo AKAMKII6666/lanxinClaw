@@ -4,6 +4,7 @@
  */
 
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { describe, it } from "node:test";
 import {
   PROTOCOL_VERSION,
@@ -112,8 +113,13 @@ async function pairAndOpenSession(
       }),
     ),
   );
-  await waitForEvent(events, (e) => e.type === "pairing.completed", 5_000);
-  const authProof = `mock-paired:${pairingId}`;
+  const completed = await waitForEvent(events, (e) => e.type === "pairing.completed", 5_000);
+  const pairingSecret = (completed.payload as { pairingSecret?: string }).pairingSecret;
+  assert.ok(pairingSecret);
+  const sessionId = createSessionId();
+  const authProof = createHmac("sha256", pairingSecret)
+    .update(`session.open:v1:${sessionId}`, "utf8")
+    .digest("hex");
   ws.send(
     JSON.stringify(
       createEnvelope({
@@ -121,7 +127,7 @@ async function pairAndOpenSession(
         target: { kind: "companion", deviceId: desktopId },
         type: "session.open",
         payload: {
-          sessionId: createSessionId(),
+          sessionId,
           phoneDeviceId: PHONE_DEVICE_ID,
           desktopDeviceId: desktopId,
           authProof,
@@ -132,6 +138,43 @@ async function pairAndOpenSession(
   );
   await waitForEvent(events, (e) => e.type === "session.accepted", 5_000);
   return authProof;
+}
+
+/**
+ * 通过 mock 桌面 HTTP 授予权限。
+ *
+ * @param baseUrl mock companion 根 URL
+ * @param permissionRequestId 权限请求 id
+ * @param decision 决策
+ */
+async function grantMockPermission(
+  baseUrl: string,
+  permissionRequestId: string,
+  decision = "allow_for_job",
+): Promise<void> {
+  const res = await fetch(`${baseUrl}/ui/permission-decide`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ permissionRequestId, decision }),
+  });
+  assert.equal(res.status, 200, `授权失败: ${await res.text()}`);
+}
+
+/**
+ * job.create 后等待 needs_permission 并模拟桌面授权。
+ *
+ * @param events 事件列表
+ * @param baseUrl mock companion 根 URL
+ */
+async function waitNeedsPermissionAndGrant(
+  events: ProtocolEnvelope[],
+  baseUrl: string,
+): Promise<void> {
+  await waitForEvent(events, (e) => e.type === "job.needs_permission", 5_000);
+  const perm = await waitForEvent(events, (e) => e.type === "permission.request", 5_000);
+  const permissionRequestId = (perm.payload as { permissionRequestId?: string }).permissionRequestId;
+  assert.ok(permissionRequestId);
+  await grantMockPermission(baseUrl, permissionRequestId!);
 }
 
 /**
@@ -149,6 +192,7 @@ async function createAffairAndJob(
   desktopId: string,
   affairId: string,
   jobId: string,
+  purpose: "execution" | "exploration" = "execution",
 ): Promise<void> {
   ws.send(
     JSON.stringify(
@@ -189,7 +233,8 @@ async function createAffairAndJob(
           affairId,
           executor: "openclaw",
           status: "queued",
-          goal: "contract mock job",
+          purpose,
+          goal: purpose === "exploration" ? "只读探索当前电脑上下文" : "contract mock job",
           workspaceHint: null,
           allowedPermissions: ["workspace.read"],
           progressSummary: "",
@@ -242,6 +287,7 @@ describe("mock companion 事件流", () => {
       const affairId = createAffairId();
       const jobId = createJobId();
       await createAffairAndJob(ws, events, desktopId, affairId, jobId);
+      await waitNeedsPermissionAndGrant(events, companion.baseUrl);
 
       await waitForEvent(events, (e) => e.type === "job.accepted", 5_000);
       await waitForEvent(events, (e) => e.type === "job.progress", 5_000);
@@ -276,6 +322,46 @@ describe("mock companion 事件流", () => {
     }
   });
 
+  it("exploration completed 只回传 job，不把 affair 推到 waiting_acceptance", async () => {
+    const companion = await startMockCompanion({
+      port: 0,
+      jobScenario: "completed",
+      stepDelayMs: 20,
+    });
+    const { events, ws } = await connectEvents(companion.wsUrl);
+    try {
+      const desktopId = companion.config.desktopDeviceId;
+      await pairAndOpenSession(ws, events, desktopId);
+      const affairId = createAffairId();
+      const jobId = createJobId();
+      await createAffairAndJob(ws, events, desktopId, affairId, jobId, "exploration");
+      await waitNeedsPermissionAndGrant(events, companion.baseUrl);
+
+      await waitForEvent(events, (e) => e.type === "job.progress", 5_000);
+      const completed = await waitForEvent(events, (e) => e.type === "job.completed", 5_000);
+      assert.equal((completed.payload as { purpose?: string }).purpose, "exploration");
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const movedToAcceptance = events.some(
+        (e) =>
+          e.type === "affair.update" &&
+          (e.payload as { affairId?: string; status?: string }).affairId === affairId &&
+          (e.payload as { status?: string }).status === "waiting_acceptance",
+      );
+      assert.equal(movedToAcceptance, false, "exploration completed 不得进入验收");
+
+      const snapRes = await fetch(`${companion.baseUrl}/ui/snapshot`);
+      const snapJson: unknown = await snapRes.json();
+      const snap = validateControlPanelSnapshot(snapJson);
+      assert.equal(snap.ok, true, snap.ok ? "" : snap.error.message);
+      const current = (snapJson as { currentAffair?: { status?: string } | null }).currentAffair;
+      assert.equal(current?.status, "ready");
+    } finally {
+      ws.close();
+      await companion.close();
+    }
+  });
+
   it("blocked 场景：发出 job.blocked 与 affair.blocked，并写入 lastError", async () => {
     const companion = await startMockCompanion({
       port: 0,
@@ -287,6 +373,7 @@ describe("mock companion 事件流", () => {
       const desktopId = companion.config.desktopDeviceId;
       await pairAndOpenSession(ws, events, desktopId);
       await createAffairAndJob(ws, events, desktopId, createAffairId(), createJobId());
+      await waitNeedsPermissionAndGrant(events, companion.baseUrl);
 
       await waitForEvent(events, (e) => e.type === "job.progress", 5_000);
       const blocked = await waitForEvent(events, (e) => e.type === "job.blocked", 5_000);

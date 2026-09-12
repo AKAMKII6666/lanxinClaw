@@ -16,7 +16,7 @@ const sampleAd: DiscoveryAdvertisement = {
   deviceName: "LIAO-PC",
   deviceIdHint: "desktop_fingerprint_hint",
   serviceVersion: "0.1.0",
-  protocolVersion: "0.1",
+  protocolVersion: "0.2",
   pairingAvailable: true,
   pairedPhoneIds: [],
   capabilities: ["pairing.v1", "session.v1"],

@@ -37,7 +37,7 @@ function requestEnvelope(pairingId: string): ProtocolEnvelope {
       pairingId,
       phoneDeviceId: "phone_contract_001",
       phoneDisplayName: "Contract Phone",
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
       capabilities: ["pairing.v1"],
     },
   });
@@ -91,7 +91,7 @@ describe("bridge × pairing reconnect/revoke contract", () => {
       phoneDeviceId: "phone_contract_001",
       desktopDeviceId: deps.desktopDeviceId,
       authProof,
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
     });
     assert.equal(auth.ok, true);
 
@@ -117,7 +117,7 @@ describe("bridge × pairing reconnect/revoke contract", () => {
       phoneDeviceId: "phone_contract_001",
       desktopDeviceId: deps.desktopDeviceId,
       authProof: createSessionAuthProof(saved.pairingSecret!, "sess_contract_2"),
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
     });
     assert.equal(afterRevoke.ok, false);
     if (!afterRevoke.ok) {

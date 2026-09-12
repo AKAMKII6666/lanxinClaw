@@ -11,9 +11,11 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import type {
   CreateOpenClawRunParams,
+  OpenClawRunContext,
   OpenClawRunSnapshot,
   OpenClawRuntimeClient,
 } from "../runtime-client.js";
+import { buildExecutionEvidence } from "../../evidence/openclaw-execution-evidence.js";
 import {
   parseLowRiskTaskKind,
   type LowRiskTaskKind,
@@ -99,21 +101,21 @@ export function createLocalSafeRuntimeClient(
       return { ...next };
     },
 
-    async getRun(runId: string): Promise<OpenClawRunSnapshot> {
+    async getRun(runId: string, context?: OpenClawRunContext): Promise<OpenClawRunSnapshot> {
       const found = runs.get(runId);
       if (!found) {
         throw new Error(`local_run_not_found:${runId}`);
       }
-      return { ...found };
+      return withEvidence(found, context);
     },
 
-    async cancelRun(runId: string): Promise<OpenClawRunSnapshot> {
+    async cancelRun(runId: string, context?: OpenClawRunContext): Promise<OpenClawRunSnapshot> {
       const found = runs.get(runId);
       if (!found) {
         throw new Error(`local_run_not_found:${runId}`);
       }
       if (TERMINAL.includes(found.status)) {
-        return { ...found };
+        return withEvidence(found, context);
       }
       const next: OpenClawRunSnapshot = {
         ...found,
@@ -121,8 +123,29 @@ export function createLocalSafeRuntimeClient(
         summary: "cancelled_by_adapter",
       };
       runs.set(runId, next);
-      return { ...next };
+      return withEvidence(next, context, true);
     },
+  };
+}
+
+function withEvidence(
+  snapshot: OpenClawRunSnapshot,
+  context?: OpenClawRunContext,
+  localCancelAck = false,
+): OpenClawRunSnapshot {
+  return {
+    ...snapshot,
+    evidence: buildExecutionEvidence({
+      runId: snapshot.runId,
+      status: snapshot.status,
+      ...(snapshot.summary !== undefined ? { summary: snapshot.summary } : {}),
+      ...(snapshot.blockedReason !== undefined ? { blockedReason: snapshot.blockedReason } : {}),
+      ...(snapshot.resumeCondition !== undefined ? { resumeCondition: snapshot.resumeCondition } : {}),
+      ...(context?.jobId ? { jobId: context.jobId } : {}),
+      ...(context?.affairId ? { affairId: context.affairId } : {}),
+      ...(context?.sessionKey ? { sessionKey: context.sessionKey } : {}),
+      localCancelAck,
+    }),
   };
 }
 

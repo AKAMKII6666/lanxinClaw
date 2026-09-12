@@ -13,6 +13,10 @@ import {
   Tray,
   ipcMain,
   nativeImage,
+  dialog,
+  safeStorage,
+  shell,
+  Notification,
 } from "electron";
 import path from "node:path";
 import { startCompanionDesktopShell } from "../electron-main.js";
@@ -32,12 +36,10 @@ void startCompanionDesktopShell(
     Menu,
     nativeImage,
     ipcMain,
-    loginItem: {
-      isOpenAtLogin: () => app.getLoginItemSettings().openAtLogin,
-      setOpenAtLogin: (openAtLogin) => {
-        app.setLoginItemSettings({ openAtLogin });
-      },
-    },
+    dialog,
+    safeStorage,
+    shell,
+    Notification,
   },
   {
     preloadPath: path.join(here, "preload.cjs"),

@@ -32,7 +32,7 @@ const result = await adapter.createJob({
 
 if (!result.ok) {
   process.stdout.write(`[gateway-smoke] expected-gated-or-failed code=${result.code} message=${result.message}\n`);
-  process.exit(result.code === "runtime_create_failed" ? 0 : 1);
+  process.exit(result.code === "gateway_url_missing" || result.code === "gateway_auth_missing" ? 0 : 1);
 }
 
 process.stdout.write(`[gateway-smoke] created job=${result.job.jobId} status=${result.job.status}\n`);

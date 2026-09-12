@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lanxing.local/schemas/result-ack.schema.json",
+  "title": "请求处理结果回执",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "ok",
+        "correlationId",
+        "acceptedType"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "0.2"
+        },
+        "ok": {
+          "const": true
+        },
+        "correlationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "acceptedType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "duplicate": {
+          "type": "boolean"
+        },
+        "result": {
+          "$ref": "affair-action-result.schema.json"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "acceptedType": {
+                "const": "affair.close"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "result"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "ok",
+        "correlationId",
+        "rejectedType",
+        "error"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "0.2"
+        },
+        "ok": {
+          "const": false
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "rejectedType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "details": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

@@ -6,124 +6,46 @@
  * 纯函数：无 I/O。
  */
 
-import { AFFAIR_STATUSES } from "../../../states/affair-status.js";
-import { JOB_STATUSES } from "../../../states/job-status.js";
-import type { AffairPayload, JobPayload } from "../../../messages/payloads/core.js";
+import { validationFailed } from "../../../errors/protocol-error.js";
 import {
-  expectEnum,
-  expectNonEmptyString,
-  expectObject,
-  expectStringArray,
-  expectStringOrNull,
-  optionalField,
-  rejectUnknownKeys,
+JOB_EVIDENCE_QUALITIES,
+JOB_RECENT_STEP_KINDS,
+type JobEvidenceQuality,
+type JobPayload,
+type JobRecentStep
+} from "../../../messages/payloads/core.js";
+import { JOB_STATUSES } from "../../../states/job-status.js";
+import {
+expectDateTime,
+expectEnum,
+expectNonEmptyString,
+expectObject,
+expectStringArray,
+expectStringOrNull,
+rejectUnknownKeys
 } from "../../primitives.js";
-import type { ValidateErr, ValidateResult } from "../../result.js";
-
-const AFFAIR_KEYS = [
-  "affairId",
-  "title",
-  "ownerAgent",
-  "status",
-  "context",
-  "acceptanceCriteria",
-  "blockedReason",
-  "resumeCondition",
-  "currentJobId",
-] as const;
+import type { ValidateResult } from "../../result.js";
 
 const JOB_KEYS = [
   "jobId",
   "affairId",
   "executor",
   "status",
+  "purpose",
   "goal",
   "workspaceHint",
   "allowedPermissions",
   "progressSummary",
+  "recentSteps",
+  "resultDigest",
+  "evidenceQuality",
   "blockedReason",
   "resumeCondition",
   "permissionRequestId",
+  "taskIntentId",
+  "statusReasonCode",
+  "statusObservedAt",
 ] as const;
-
-/**
- * 读取可选 string|null 字段并写入目标对象。
- *
- * @param obj 源对象
- * @param key 字段名
- * @param target 目标载荷
- * @returns 失败时返回错误结果；成功返回 null
- */
-function assignOptionalStringOrNull<T extends object>(
-  obj: Record<string, unknown>,
-  key: keyof T & string,
-  target: T,
-): ValidateErr | null {
-  const checked = optionalField(obj, key, (v) => expectStringOrNull(v, key));
-  if (!checked.ok) {
-    return checked;
-  }
-  if (checked.value !== undefined) {
-    (target as Record<string, unknown>)[key] = checked.value;
-  }
-  return null;
-}
-
-/**
- * 校验 AffairPayload。
- *
- * @param value 待检 payload
- * @returns AffairPayload 或失败
- */
-export function validateAffairPayload(value: unknown): ValidateResult<AffairPayload> {
-  const obj = expectObject(value, "affair.payload");
-  if (!obj.ok) {
-    return obj;
-  }
-  const keys = rejectUnknownKeys(obj.value, AFFAIR_KEYS, "affair.payload");
-  if (!keys.ok) {
-    return keys;
-  }
-  const affairId = expectNonEmptyString(obj.value.affairId, "affairId");
-  if (!affairId.ok) {
-    return affairId;
-  }
-  const title = expectNonEmptyString(obj.value.title, "title");
-  if (!title.ok) {
-    return title;
-  }
-  const ownerAgent = expectEnum(obj.value.ownerAgent, "ownerAgent", ["zhang-boss"] as const);
-  if (!ownerAgent.ok) {
-    return ownerAgent;
-  }
-  const status = expectEnum(obj.value.status, "status", AFFAIR_STATUSES);
-  if (!status.ok) {
-    return status;
-  }
-  const context = expectStringArray(obj.value.context, "context");
-  if (!context.ok) {
-    return context;
-  }
-  const acceptanceCriteria = expectStringArray(obj.value.acceptanceCriteria, "acceptanceCriteria");
-  if (!acceptanceCriteria.ok) {
-    return acceptanceCriteria;
-  }
-  const payload: AffairPayload = {
-    affairId: affairId.value,
-    title: title.value,
-    ownerAgent: ownerAgent.value,
-    status: status.value,
-    context: context.value,
-    acceptanceCriteria: acceptanceCriteria.value,
-  };
-  for (const key of ["blockedReason", "resumeCondition", "currentJobId"] as const) {
-    const err = assignOptionalStringOrNull(obj.value, key, payload);
-    if (err) {
-      return err;
-    }
-  }
-  return { ok: true, value: payload };
-}
 
 /**
  * 读取 job 必填字段。
@@ -172,6 +94,49 @@ function readJobRequired(
 }
 
 /**
+ * 校验 recentSteps 数组。
+ *
+ * @param value 待检值
+ * @returns 步骤数组或失败
+ */
+function validateRecentSteps(value: unknown): ValidateResult<JobRecentStep[]> {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: validationFailed("recentSteps 必须是数组") };
+  }
+  if (value.length > 8) {
+    return { ok: false, error: validationFailed("recentSteps 最多 8 条") };
+  }
+  const steps: JobRecentStep[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const item = expectObject(value[index], `recentSteps[${index}]`);
+    if (!item.ok) {
+      return item;
+    }
+    const keys = rejectUnknownKeys(item.value, ["at", "kind", "text"] as const, `recentSteps[${index}]`);
+    if (!keys.ok) {
+      return keys;
+    }
+    const at = expectDateTime(item.value.at, `recentSteps[${index}].at`);
+    if (!at.ok) {
+      return at;
+    }
+    const kind = expectEnum(item.value.kind, `recentSteps[${index}].kind`, JOB_RECENT_STEP_KINDS);
+    if (!kind.ok) {
+      return kind;
+    }
+    const text = expectNonEmptyString(item.value.text, `recentSteps[${index}].text`);
+    if (!text.ok) {
+      return text;
+    }
+    if (text.value.length > 240) {
+      return { ok: false, error: validationFailed(`recentSteps[${index}].text 不得超过 240 字`) };
+    }
+    steps.push({ at: at.value, kind: kind.value, text: text.value });
+  }
+  return { ok: true, value: steps };
+}
+
+/**
  * 读取 job 可选字段并合并。
  *
  * @param obj 源对象
@@ -182,6 +147,13 @@ function mergeJobOptionals(
   obj: Record<string, unknown>,
   payload: JobPayload,
 ): ValidateResult<JobPayload> {
+  if ("purpose" in obj) {
+    const purpose = expectEnum(obj.purpose, "purpose", ["execution", "exploration"] as const);
+    if (!purpose.ok) {
+      return purpose;
+    }
+    payload.purpose = purpose.value;
+  }
   if ("progressSummary" in obj) {
     if (typeof obj.progressSummary !== "string") {
       return {
@@ -195,11 +167,43 @@ function mergeJobOptionals(
     }
     payload.progressSummary = obj.progressSummary;
   }
-  for (const key of ["workspaceHint", "blockedReason", "resumeCondition", "permissionRequestId"] as const) {
+  if ("recentSteps" in obj) {
+    const steps = validateRecentSteps(obj.recentSteps);
+    if (!steps.ok) {
+      return steps;
+    }
+    payload.recentSteps = steps.value;
+  }
+  if ("resultDigest" in obj) {
+    const digest = expectStringOrNull(obj.resultDigest, "resultDigest");
+    if (!digest.ok) {
+      return digest;
+    }
+    payload.resultDigest = digest.value;
+  }
+  if ("evidenceQuality" in obj) {
+    const quality = expectEnum(obj.evidenceQuality, "evidenceQuality", JOB_EVIDENCE_QUALITIES);
+    if (!quality.ok) {
+      return quality;
+    }
+    payload.evidenceQuality = quality.value as JobEvidenceQuality;
+  }
+  for (const key of [
+    "workspaceHint",
+    "blockedReason",
+    "resumeCondition",
+    "permissionRequestId",
+    "taskIntentId",
+    "statusReasonCode",
+  ] as const) {
     const err = assignOptionalStringOrNull(obj, key, payload);
     if (err) {
       return err;
     }
+  }
+  const observedAtErr = assignOptionalDateTimeOrNull(obj, "statusObservedAt", payload);
+  if (observedAtErr) {
+    return observedAtErr;
   }
   return { ok: true, value: payload };
 }
@@ -225,3 +229,9 @@ export function validateJobPayload(value: unknown): ValidateResult<JobPayload> {
   }
   return mergeJobOptionals(obj.value, { ...required.value });
 }
+
+import { assignOptionalDateTimeOrNull,assignOptionalStringOrNull } from "./job/fields.js";
+
+export { validateAffairPayload } from "./affair.js";
+
+export { validateJobCancelPayload } from "./job/cancel.js";

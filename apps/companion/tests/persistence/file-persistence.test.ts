@@ -12,8 +12,10 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { createDeviceIdentityStore } from "../../src/credentials/identity-store.js";
+import { EncryptedIdentityPersistence } from "../../src/credentials/persistence/encrypted-identity-persistence.js";
 import { FileIdentityPersistence } from "../../src/credentials/persistence/file-identity-persistence.js";
 import { createFileAuditStore } from "../../src/audit/file-store.js";
+import { createUnavailableSecrets } from "../../src/onboarding/store/secrets.js";
 
 describe("companion file persistence", () => {
   it("identity 文件后端支持保存、重载和 revoke 不复活", async () => {
@@ -46,5 +48,56 @@ describe("companion file persistence", () => {
     const second = createFileAuditStore(file);
     assert.equal(second.listRecent().length, 1);
     assert.equal(fs.readFileSync(file, "utf8").includes("Bearer"), false);
+  });
+
+  it("pairingSecret 加密落盘；secrets 不可用时拒绝保存", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lanxin-identity-enc-"));
+    const file = path.join(dir, "identity.json");
+    const secrets = {
+      encrypt: (plain: string) => `enc:${Buffer.from(plain, "utf8").toString("base64")}`,
+      decrypt: (encrypted: string) => {
+        if (!encrypted.startsWith("enc:")) {
+          return null;
+        }
+        return Buffer.from(encrypted.slice(4), "base64").toString("utf8");
+      },
+      isAvailable: () => true,
+    };
+    const store = createDeviceIdentityStore(
+      new EncryptedIdentityPersistence(new FileIdentityPersistence(file), secrets),
+    );
+    const saved = await store.savePairedIdentity({
+      pairingId: "pair_enc_001",
+      phoneDeviceId: "phone_enc_001",
+      phoneDisplayName: "phone",
+      desktopDeviceId: "desktop_enc_001",
+      desktopDisplayName: "desktop",
+      pairedAt: new Date().toISOString(),
+    });
+    assert.ok(saved.pairingSecret);
+    const raw = fs.readFileSync(file, "utf8");
+    assert.equal(raw.includes(saved.pairingSecret ?? ""), false);
+    assert.equal(raw.includes("enc:"), true);
+    const reloaded = createDeviceIdentityStore(
+      new EncryptedIdentityPersistence(new FileIdentityPersistence(file), secrets),
+    );
+    const found = await reloaded.findIdentity("phone_enc_001", "desktop_enc_001");
+    assert.equal(found?.pairingSecret, saved.pairingSecret);
+
+    const blocked = createDeviceIdentityStore(
+      new EncryptedIdentityPersistence(new FileIdentityPersistence(file), createUnavailableSecrets()),
+    );
+    await assert.rejects(
+      () =>
+        blocked.savePairedIdentity({
+          pairingId: "pair_enc_002",
+          phoneDeviceId: "phone_enc_002",
+          phoneDisplayName: "phone",
+          desktopDeviceId: "desktop_enc_002",
+          desktopDisplayName: "desktop",
+          pairedAt: new Date().toISOString(),
+        }),
+      /identity_secrets_unavailable/,
+    );
   });
 });

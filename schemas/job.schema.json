@@ -19,6 +19,9 @@
     "status": {
       "enum": ["queued", "running", "needs_permission", "blocked", "completed", "failed", "canceled"]
     },
+    "purpose": {
+      "enum": ["execution", "exploration"]
+    },
     "goal": {
       "type": "string",
       "minLength": 1
@@ -29,11 +32,40 @@
     "allowedPermissions": {
       "type": "array",
       "items": {
-        "type": "string"
+        "$ref": "permission.schema.json#/$defs/permissionId"
       }
     },
     "progressSummary": {
       "type": "string"
+    },
+    "recentSteps": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["at", "kind", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "enum": ["tool", "lifecycle", "reply", "task"]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          }
+        }
+      }
+    },
+    "resultDigest": {
+      "type": ["string", "null"]
+    },
+    "evidenceQuality": {
+      "enum": ["missing", "weak", "present"]
     },
     "blockedReason": {
       "type": ["string", "null"]
@@ -43,8 +75,18 @@
     },
     "permissionRequestId": {
       "type": ["string", "null"]
+    },
+    "taskIntentId": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "statusReasonCode": {
+      "type": ["string", "null"]
+    },
+    "statusObservedAt": {
+      "type": ["string", "null"],
+      "format": "date-time"
     }
   },
   "additionalProperties": false
 }
-

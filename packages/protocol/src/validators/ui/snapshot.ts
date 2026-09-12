@@ -7,13 +7,13 @@
  */
 
 import { PROTOCOL_VERSION } from "../../protocol-version.js";
-import { AFFAIR_STATUSES } from "../../states/affair-status.js";
 import {
-  expectDateTime,
-  expectEnum,
-  expectNonEmptyString,
-  expectObject,
-  rejectUnknownKeys,
+expectDateTime,
+expectEnum,
+expectNonEmptyString,
+expectObject,
+expectStringOrNull,
+rejectUnknownKeys
 } from "../primitives.js";
 import type { ValidateResult } from "../result.js";
 
@@ -27,122 +27,91 @@ const SNAPSHOT_KEYS = [
   "device",
   "zhangBoss",
   "currentAffair",
+  "affairs",
+  "recentActionDeliveries",
+  "sideChannel",
 ] as const;
 
-/**
- * 校验五段状态卡的 status 枚举与关键字段。
- *
- * @param obj snapshot 对象
- * @returns 通过或失败
- */
-function validateStatusCards(obj: Record<string, unknown>): ValidateResult<undefined> {
-  for (const section of ["companion", "clawCore", "credential", "device", "zhangBoss"] as const) {
-    const sectionObj = expectObject(obj[section], section);
-    if (!sectionObj.ok) {
-      return sectionObj;
-    }
+function validateSideChannel(value: unknown): ValidateResult<undefined> {
+  if (value === undefined) {
+    return { ok: true, value: undefined };
   }
-  const companionStatus = expectEnum(
-    (obj.companion as Record<string, unknown>).status,
-    "companion.status",
-    ["stopped", "starting", "running", "degraded", "error"] as const,
-  );
-  if (!companionStatus.ok) {
-    return companionStatus;
+  const channel = expectObject(value, "sideChannel");
+  if (!channel.ok) {
+    return channel;
   }
-  const claw = obj.clawCore as Record<string, unknown>;
-  const clawStatus = expectEnum(claw.status, "clawCore.status", [
-    "not_installed",
-    "stopped",
-    "starting",
-    "running",
-    "error",
-  ] as const);
-  if (!clawStatus.ok) {
-    return clawStatus;
-  }
-  if (typeof claw.adapterReady !== "boolean") {
+  if (typeof channel.value.pendingContextCount !== "number") {
     return {
       ok: false,
       error: {
         code: "validation_failed",
-        message: "clawCore.adapterReady 必须是布尔值",
+        message: "sideChannel.pendingContextCount 必须是数字",
         retryable: false,
       },
     };
   }
-  const credential = obj.credential as Record<string, unknown>;
-  const credentialStatus = expectEnum(credential.status, "credential.status", [
-    "missing",
-    "synced",
-    "expired",
-    "needs_reauth",
-  ] as const);
-  if (!credentialStatus.ok) {
-    return credentialStatus;
-  }
-  const provider = expectNonEmptyString(credential.provider, "credential.provider");
-  if (!provider.ok) {
-    return provider;
-  }
-  const deviceStatus = expectEnum(
-    (obj.device as Record<string, unknown>).status,
-    "device.status",
-    ["undiscovered", "discovered", "pairing", "connected", "disconnected"] as const,
-  );
-  if (!deviceStatus.ok) {
-    return deviceStatus;
-  }
-  const zhangStatus = expectEnum(
-    (obj.zhangBoss as Record<string, unknown>).status,
-    "zhangBoss.status",
-    ["offline", "online", "in_call", "supervising", "waiting_user"] as const,
-  );
-  if (!zhangStatus.ok) {
-    return zhangStatus;
+  if (!Array.isArray(channel.value.messages) || !Array.isArray(channel.value.attachments)) {
+    return {
+      ok: false,
+      error: {
+        code: "validation_failed",
+        message: "sideChannel.messages / attachments 必须是数组",
+        retryable: false,
+      },
+    };
   }
   return { ok: true, value: undefined };
 }
 
-/**
- * 校验 currentAffair 摘要；允许 null。
- *
- * @param value currentAffair 字段
- * @returns 通过或失败
- */
-function validateCurrentAffair(value: unknown): ValidateResult<undefined> {
-  if (value === null) {
+function validateRecentActionDeliveries(value: unknown): ValidateResult<undefined> {
+  if (value === undefined) {
     return { ok: true, value: undefined };
   }
-  const affair = expectObject(value, "currentAffair");
-  if (!affair.ok) {
-    return affair;
-  }
-  const affairId = expectNonEmptyString(affair.value.affairId, "currentAffair.affairId");
-  if (!affairId.ok) {
-    return affairId;
-  }
-  const title = expectNonEmptyString(affair.value.title, "currentAffair.title");
-  if (!title.ok) {
-    return title;
-  }
-  const status = expectEnum(affair.value.status, "currentAffair.status", AFFAIR_STATUSES);
-  if (!status.ok) {
-    return status;
-  }
-  if (typeof affair.value.progressSummary !== "string") {
+  if (!Array.isArray(value)) {
     return {
       ok: false,
       error: {
         code: "validation_failed",
-        message: "currentAffair.progressSummary 必须是字符串",
+        message: "recentActionDeliveries 必须是数组",
         retryable: false,
       },
     };
   }
-  const updatedAt = expectDateTime(affair.value.updatedAt, "currentAffair.updatedAt");
-  if (!updatedAt.ok) {
-    return updatedAt;
+  for (let index = 0; index < value.length; index += 1) {
+    const item = expectObject(value[index], `recentActionDeliveries[${index}]`);
+    if (!item.ok) {
+      return item;
+    }
+    const receiptId = expectNonEmptyString(item.value.actionReceiptId, `recentActionDeliveries[${index}].actionReceiptId`);
+    if (!receiptId.ok) {
+      return receiptId;
+    }
+    const status = expectEnum(item.value.status, `recentActionDeliveries[${index}].status`, [
+      "sent_to_phone",
+      "queued_until_session",
+      "rejected",
+      "applied_locally",
+      "waiting_for_callback",
+    ] as const);
+    if (!status.ok) {
+      return status;
+    }
+    for (const key of ["affairId", "jobId", "reasonCode"] as const) {
+      const checked = expectStringOrNull(item.value[key], `recentActionDeliveries[${index}].${key}`);
+      if (!checked.ok) {
+        return checked;
+      }
+    }
+    if (item.value.deliveredAt !== null) {
+      const deliveredAt = expectDateTime(item.value.deliveredAt, `recentActionDeliveries[${index}].deliveredAt`);
+      if (!deliveredAt.ok) {
+        return deliveredAt;
+      }
+    }
+    const message = expectNonEmptyString(item.value.message, `recentActionDeliveries[${index}].message`);
+    if (!message.ok) {
+      return message;
+    }
   }
   return { ok: true, value: undefined };
 }
@@ -190,5 +159,21 @@ export function validateControlPanelSnapshot(
   if (!affair.ok) {
     return affair;
   }
+  const affairs = validateAffairs(obj.value.affairs);
+  if (!affairs.ok) {
+    return affairs;
+  }
+  const deliveries = validateRecentActionDeliveries(obj.value.recentActionDeliveries);
+  if (!deliveries.ok) {
+    return deliveries;
+  }
+  const sideChannel = validateSideChannel(obj.value.sideChannel);
+  if (!sideChannel.ok) {
+    return sideChannel;
+  }
   return { ok: true, value: obj.value };
 }
+
+import { validateAffairs,validateCurrentAffair } from "./affairs.js";
+
+import { validateStatusCards } from "./status-cards.js";

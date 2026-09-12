@@ -18,6 +18,12 @@ const CHANNELS = {
   reportError: "lanxin:bridge:reportError",
   listPendingPermissions: "lanxin:bridge:listPendingPermissions",
   getDiagnosticReport: "lanxin:bridge:getDiagnosticReport",
+  log: "lanxin:bridge:log",
+  onboardingStatus: "lanxin:bridge:onboardingStatus",
+  onboardingSubmit: "lanxin:bridge:onboardingSubmit",
+  onboardingBootstrapRuntime: "lanxin:bridge:onboardingBootstrapRuntime",
+  onboardingClear: "lanxin:bridge:onboardingClear",
+  onboardingProgress: "lanxin:bridge:onboardingProgress",
 };
 
 contextBridge.exposeInMainWorld("lanxinCompanionBridge", {
@@ -47,5 +53,34 @@ contextBridge.exposeInMainWorld("lanxinCompanionBridge", {
   },
   getDiagnosticReport() {
     return ipcRenderer.invoke(CHANNELS.getDiagnosticReport);
+  },
+  log(entry) {
+    return ipcRenderer.invoke(CHANNELS.log, entry);
+  },
+  onboarding: {
+    getStatus() {
+      return ipcRenderer.invoke(CHANNELS.onboardingStatus);
+    },
+    submit(config) {
+      return ipcRenderer.invoke(CHANNELS.onboardingSubmit, config);
+    },
+    bootstrapRuntime() {
+      return ipcRenderer.invoke(CHANNELS.onboardingBootstrapRuntime);
+    },
+    clear() {
+      return ipcRenderer.invoke(CHANNELS.onboardingClear);
+    },
+    subscribeProgress(listener) {
+      if (typeof listener !== "function") {
+        return () => undefined;
+      }
+      const handler = (_event, phase) => {
+        listener(phase);
+      };
+      ipcRenderer.on(CHANNELS.onboardingProgress, handler);
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.onboardingProgress, handler);
+      };
+    },
   },
 });

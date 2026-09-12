@@ -7,13 +7,21 @@
  */
 
 import type { ChatAttachTarget, ChatContentKind } from "../views.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * 一条待投递上下文。
  */
 export interface PendingContextItem {
+  /** 原消息 ID 与寻址；旧镜像缺失时保持待确认，不能改投新设备 */
+  sourceId?: string;
+  sourceKind?: "message" | "context_attach";
+  phoneDeviceId?: string;
+  desktopDeviceId?: string;
   /** 本地 id */
   pendingId: string;
+  /** 原 bridge action receipt id；旧数据可无 */
+  actionReceiptId?: string | null;
   /** 正文；untrusted */
   text: string;
   /** 内容种类 */
@@ -22,6 +30,8 @@ export interface PendingContextItem {
   target: ChatAttachTarget;
   /** 事务 id；affair 目标必填 */
   affairId: string | null;
+  /** 入队时绑定的 job id；旧数据可无 */
+  jobId?: string | null;
   /** 入队时间 */
   enqueuedAt: string;
 }
@@ -31,7 +41,17 @@ export interface PendingContextItem {
  */
 export class PendingContextQueue {
   #items: PendingContextItem[] = [];
-  #seq = 0;
+  #onChange: () => void = () => {};
+
+  /** 持久化必须在发出消息前成功；失败恢复队列。 */
+  setOnChange(callback: () => void): void { this.#onChange = callback; }
+
+  #replace(next: PendingContextItem[]): void {
+    const previous = this.#items;
+    this.#items = next;
+    try { this.#onChange(); }
+    catch (error) { this.#items = previous; throw error; }
+  }
 
   /**
    * 入队一条 untrusted 上下文。
@@ -40,14 +60,20 @@ export class PendingContextQueue {
    * @returns 条目或错误
    */
   enqueue(input: {
+    sourceId?: string;
+    sourceKind?: "message" | "context_attach";
+    phoneDeviceId?: string;
+    desktopDeviceId?: string;
     text: string;
     contentKind: ChatContentKind;
     target: ChatAttachTarget;
     affairId: string | null;
+    actionReceiptId?: string | null;
+    jobId?: string | null;
     enqueuedAt?: string;
   }): { ok: true; item: PendingContextItem } | { ok: false; code: string; message: string } {
-    const text = input.text.trim();
-    if (!text) {
+    const text = input.text;
+    if (!text.trim()) {
       return { ok: false, code: "pending_empty", message: "上下文不能为空" };
     }
     if (input.target === "affair" && !input.affairId) {
@@ -57,16 +83,18 @@ export class PendingContextQueue {
         message: "附加到 affair 时必须提供 affairId",
       };
     }
-    this.#seq += 1;
     const item: PendingContextItem = {
-      pendingId: `pending_ctx_${String(this.#seq).padStart(4, "0")}`,
+      ...input,
+      pendingId: `pending_ctx_${randomUUID()}`,
+      actionReceiptId: input.actionReceiptId ?? null,
       text,
       contentKind: input.contentKind,
       target: input.target,
       affairId: input.affairId,
+      jobId: input.jobId ?? null,
       enqueuedAt: input.enqueuedAt ?? new Date().toISOString(),
     };
-    this.#items.push(item);
+    this.#replace([...this.#items, item]);
     return { ok: true, item };
   }
 
@@ -90,8 +118,29 @@ export class PendingContextQueue {
     if (idx < 0) {
       return null;
     }
-    const [item] = this.#items.splice(idx, 1);
+    const item = this.#items[idx];
+    this.#replace(this.#items.filter((_, i) => i !== idx));
     return item ?? null;
+  }
+
+  /**
+   * 取出全部未消费项。
+   *
+   * @returns 原队列内容
+   */
+  drain(): PendingContextItem[] {
+    const items = [...this.#items];
+    this.#replace([]);
+    return items;
+  }
+
+  /**
+   * 从落盘恢复。
+   *
+   * @param items 条目
+   */
+  restore(items: readonly PendingContextItem[]): void {
+    this.#items = items.map((item) => ({ ...item }));
   }
 }
 

@@ -5,57 +5,44 @@
  * 不拥有：HTTP/WebSocket 监听、OpenClaw runtime 具体实现、renderer UI。
  * 副作用：更新内存 state 并推送 bridge snapshot。
  */
+import { superviseBackendAffair } from "./supervision/observe.js";
 
-import type { ProtocolEnvelope } from "@lanxin-claw/protocol";
-import { CompanionBridgeHost, type SnapshotListener } from "../bridge/host.js";
+
+import type { AffairPayload } from "@lanxin-claw/protocol";
+import { AffairActionCoordinator } from "../affairs/actions/coordinator.js";
+import { commitJobCreation } from "./jobs/create.js";
+import { createMemoryAuditStore } from "../audit/memory-store.js";
 import type {
-  BridgeActionResult,
-  BridgeUiAction,
-  ControlPanelSnapshotView,
+BridgeActionDelivery
 } from "../bridge/contract.js";
-import type { PendingPermissionCardView } from "../permissions/views.js";
-import { PermissionGate } from "../permissions/gate/permission-gate.js";
+import { CompanionBridgeHost } from "../bridge/host.js";
+import {
+createPendingContextQueue
+} from "../chat/channel/pending-context.js";
 import { buildDiagnosticReport } from "../diagnostics/probes.js";
-import type { DiagnosticReportView } from "../ui/pages/diagnostics/diagnostics-models.js";
-import { applyProtocolEnvelopeToState, createCompanionBackendState } from "../state/store.js";
+import { PermissionGate } from "../permissions/gate/permission-gate.js";
+import {
+hydrateBackendMirror,
+snapshotBackendMirror
+} from "../state/mirror/backend-mirror.js";
 import { projectControlPanelSnapshot } from "../state/projector.js";
-import type { ApplyProtocolResult, CompanionBackendState } from "../state/types.js";
-
-/**
- * Backend runtime 选项。
- */
-export interface CompanionBackendRuntimeOptions {
-  /** 初始 state；缺省创建空 state */
-  state?: CompanionBackendState;
-  /** 权限 gate；缺省空 gate */
-  permissionGate?: PermissionGate;
-  /** bridge action 被接受后的 backend side-effect；不得暴露给 renderer */
-  onBridgeAction?: (action: BridgeUiAction, result: BridgeActionResult) => void | Promise<void>;
-}
-
-/**
- * Companion backend API。
- */
-export interface CompanionBackendRuntime {
-  /** 应用入站协议 envelope */
-  applyProtocolEnvelope(envelope: ProtocolEnvelope): ApplyProtocolResult;
-  /** 应用 UI 操作 */
-  applyBridgeAction(action: BridgeUiAction): Promise<BridgeActionResult>;
-  /** 订阅 snapshot */
-  subscribeSnapshot(listener: SnapshotListener): () => void;
-  /** 读取 snapshot */
-  getSnapshot(): ControlPanelSnapshotView;
-  /** 读取待确认权限卡片 */
-  listPendingPermissionCards(): PendingPermissionCardView[];
-  /** 读取内部 state（测试/诊断用） */
-  getState(): CompanionBackendState;
-  /** 读取 bridge host */
-  getBridgeHost(): CompanionBridgeHost;
-  /** 读取权限 gate（仅 backend/server 层使用） */
-  getPermissionGate(): PermissionGate;
-  /** 读取真实诊断报告 */
-  getDiagnosticReport(): DiagnosticReportView;
-}
+import {
+applyProtocolEnvelopeToState,
+createCompanionBackendState,
+reconcileAffairsFromJobs,
+} from "../state/store.js";
+import {
+createSupervisionNotifyMemory
+} from "../supervision/tick.js";
+import { validateBridgeActionAgainstState } from "./bridge-action-policy.js";
+import { applyMessageReceipt } from "./chat/message-receipts.js";
+import {
+appendAuditForApplyFailure,
+appendAuditForBridgeAction,
+appendAuditForEnvelope,
+auditRecordsToViews,
+expirePermissionsForTerminalAffair,
+} from "./runtime-audit.js";
 
 /**
  * 创建 companion backend runtime。
@@ -68,22 +55,156 @@ export function createCompanionBackendRuntime(
 ): CompanionBackendRuntime {
   const state = options.state ?? createCompanionBackendState();
   const gate = options.permissionGate ?? new PermissionGate();
-  const host = new CompanionBridgeHost(projectControlPanelSnapshot(state), gate);
+  const auditStore = options.auditStore ?? createMemoryAuditStore();
+  const pendingContext = options.pendingContext ?? createPendingContextQueue();
+  if (options.mirrorStore) {
+    const loaded = options.mirrorStore.load();
+    hydrateBackendMirror(state, loaded);
+    reconcileAffairsFromJobs(state);
+    pendingContext.restore(loaded.pendingContext ?? []);
+  }
+  const notifyMemory = createSupervisionNotifyMemory();
+  const host = new CompanionBridgeHost(projectNow(), gate);
+  const affairActions = new AffairActionCoordinator({ state, gate, persist: persistMirror, publish: publishSnapshot });
 
-  function publishSnapshot(): void {
-    host.setSnapshot(projectControlPanelSnapshot(state));
+  function projectNow() {
+    return projectControlPanelSnapshot(state, {
+      ...options.snapshotExtras?.(),
+      pendingContextCount: pendingContext.list().length,
+    });
   }
 
+  function persistMirror(): void {
+    options.mirrorStore?.save(snapshotBackendMirror(state, pendingContext.list()));
+  }
+
+  pendingContext.setOnChange(persistMirror);
+
+  function rememberBridgeActionDelivery(delivery: BridgeActionDelivery): void {
+    state.bridgeActionDeliveries.unshift(delivery);
+    state.bridgeActionDeliveries.splice(50);
+  }
+
+  function publishSnapshot(): void {
+    state.auditRecords = auditRecordsToViews(auditStore.listRecent(50));
+    host.setSnapshot(projectNow());
+    persistMirror();
+  }
+
+  function runSupervisionPass(): void {
+    for (const affair of state.affairs.values()) {
+      superviseBackendAffair(state, affair, options, notifyMemory);
+    }
+    publishSnapshot();
+  }
+
+  const supervisionMs = options.supervisionIntervalMs ?? 0;
+  const supervisionTimer =
+    supervisionMs > 0
+      ? setInterval(() => {
+          runSupervisionPass();
+        }, supervisionMs)
+      : null;
+  supervisionTimer?.unref?.();
+
   return {
+    applyJobCreation(command, events) {
+      const result = commitJobCreation(state, command, events, persistMirror);
+      if (result.ok) {
+        for (const event of events) appendAuditForEnvelope(auditStore, event);
+        host.setSnapshot(projectNow());
+      }
+      return result;
+    },
+    getAffairActions: () => affairActions,
     applyProtocolEnvelope(envelope) {
+      if (envelope.type === "chat.read_receipt") {
+        const receipt = applyMessageReceipt(state, pendingContext, envelope, persistMirror);
+        if (receipt.ok) publishSnapshot();
+        return receipt;
+      }
+      if (envelope.type === "affair.close") {
+        return { ok: false, code: "affair_action_required", message: "关闭命令与结果由事务协调器处理", retryable: false };
+      }
+      if (envelope.type.startsWith("affair.")) {
+        const fact = envelope.payload as { affairId?: string; status?: string };
+        if (fact.affairId && ["closed", "canceled"].includes(fact.status ?? "") &&
+            state.affairs.get(fact.affairId)?.status !== fact.status) {
+          return { ok: false, code: "affair_action_required", message: "终态必须由共同事务协调器提交", retryable: false };
+        }
+      }
+      if (envelope.source.kind === "phone" && envelope.type.startsWith("affair.")) {
+        const payload = envelope.payload as unknown as AffairPayload;
+        if (["closed", "canceled"].includes(payload.status) || affairActions.isClosing(payload.affairId)) {
+          return { ok: false, code: "affair_action_required", message: "事务关闭必须经动作协调器确认", retryable: false };
+        }
+      }
       const result = applyProtocolEnvelopeToState(state, envelope);
+      if (!result.ok) {
+        appendAuditForApplyFailure(auditStore, envelope, result);
+      }
+      if (result.ok && !result.duplicate) {
+        expirePermissionsForTerminalAffair(gate, auditStore, envelope);
+        appendAuditForEnvelope(auditStore, envelope);
+        if (envelope.type === "job.blocked" || envelope.type === "job.failed") {
+          const payload = envelope.payload as {
+            affairId?: string;
+            jobId?: string;
+            statusReasonCode?: string | null;
+          };
+          state.lastError = {
+            code: payload.statusReasonCode ?? envelope.type,
+            message: (envelope.payload as { blockedReason?: string; progressSummary?: string }).blockedReason
+              ?? envelope.type,
+            occurredAt: new Date().toISOString(),
+            affairId: payload.affairId ?? null,
+            jobId: payload.jobId ?? null,
+          };
+        }
+      }
       publishSnapshot();
       return result;
     },
     async applyBridgeAction(action) {
+      if (action.type === "device.revokePairing") {
+        gate.revokeAll();
+        state.connection.sessionAuthenticated = false;
+        state.connection.sessionId = null;
+        state.connection.phoneDeviceId = null;
+        state.connection.pairingId = null;
+        state.connection.phoneDisplayName = null;
+        await options.onDeviceRevokePairing?.({
+          phoneDeviceId: action.phoneDeviceId,
+          desktopDeviceId: action.desktopDeviceId,
+        });
+      }
+      const statefulError = validateBridgeActionAgainstState(state, action, gate);
+      if (statefulError) {
+        return statefulError;
+      }
+      if ((action.type === "affair.accept" || action.type === "affair.cancel") && !options.onBridgeAction) {
+        return { ok: false, error: { code: "affair_action_unavailable", message: "事务协调器尚未接入桌面动作", retryable: true } };
+      }
       const result = host.submitAction(action);
       if (result.ok) {
+        if (action.type === "permission.decide" && (action.decision === "allow_once" || action.decision === "allow_for_job")) {
+          const request = gate.getRequest(action.permissionRequestId);
+          if (request?.risk === "high") {
+            auditStore.append({
+              kind: "high_risk_action",
+              summary: "用户授予高风险权限",
+              permissionRequestId: action.permissionRequestId,
+              affairId: request.affairId,
+              jobId: request.jobId,
+              outcome: action.decision,
+            });
+          }
+        }
         await options.onBridgeAction?.(action, result);
+        if (result.delivery) {
+          rememberBridgeActionDelivery(result.delivery);
+        }
+        appendAuditForBridgeAction(auditStore, action, result);
       }
       publishSnapshot();
       return result;
@@ -97,6 +218,21 @@ export function createCompanionBackendRuntime(
     listPendingPermissionCards() {
       return host.listPendingPermissionCards();
     },
+    markConnectionLost() {
+      state.connection.sessionAuthenticated = false;
+      state.connection.lastSeenAt = new Date().toISOString();
+      state.lastError = {
+        code: "connection_lost",
+        message: "电话心跳超时，会话已标记断开；重连需重新 session.open",
+        occurredAt: new Date().toISOString(),
+      };
+      auditStore.append({
+        kind: "pairing",
+        summary: "电话会话心跳超时，已标记失联",
+        outcome: "connection_lost",
+      });
+      publishSnapshot();
+    },
     getState() {
       return state;
     },
@@ -108,21 +244,43 @@ export function createCompanionBackendRuntime(
     },
     getDiagnosticReport() {
       return buildDiagnosticReport({
-        gatewayReady: state.jobs.size > 0,
-        lanDiscoveryReady: state.connection.phoneDeviceId !== null,
-        secureStorageReady: false,
+        ...options.diagnosticsInput?.(),
         lastError: state.lastError
           ? {
               occurredAt: state.lastError.occurredAt,
               code: state.lastError.code,
               severity: "warn",
               message: state.lastError.message,
-              affairId: null,
-              jobId: null,
+              affairId: state.lastError.affairId ?? null,
+              jobId: state.lastError.jobId ?? null,
               retryable: false,
             }
           : null,
       });
     },
+    getPendingContext() {
+      return pendingContext;
+    },
+    recordBridgeActionDelivery(delivery) {
+      rememberBridgeActionDelivery(delivery);
+      publishSnapshot();
+    },
+    stopSupervision() {
+      if (supervisionTimer) {
+        clearInterval(supervisionTimer);
+      }
+    },
+    recordInboundMessageId(messageId) {
+      const now = new Date().toISOString();
+      state.seenMessages.set(messageId, { messageId, seenAt: now });
+      state.updatedAt = now;
+    },
+    appendAudit(input) {
+      auditStore.append(input);
+      publishSnapshot();
+    },
   };
 }
+
+import type { CompanionBackendRuntime, CompanionBackendRuntimeOptions } from "./contracts/runtime.js";
+export type { CompanionBackendRuntime, CompanionBackendRuntimeOptions } from "./contracts/runtime.js";

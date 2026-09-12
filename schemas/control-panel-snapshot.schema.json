@@ -18,7 +18,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "0.1"
+      "const": "0.2"
     },
     "snapshotId": {
       "type": "string",
@@ -48,6 +48,17 @@
         { "type": "null" },
         { "$ref": "#/$defs/currentAffairSummary" }
       ]
+    },
+    "affairs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/currentAffairSummary" }
+    },
+    "recentActionDeliveries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bridgeActionDelivery" }
+    },
+    "sideChannel": {
+      "$ref": "#/$defs/sideChannel"
     }
   },
   "additionalProperties": false,
@@ -197,8 +208,39 @@
         "currentJobId": {
           "type": ["string", "null"]
         },
+        "currentJobStatus": {
+          "type": ["string", "null"],
+          "enum": ["queued", "running", "needs_permission", "blocked", "completed", "failed", "canceled", null]
+        },
+        "currentJobGoal": {
+          "type": ["string", "null"]
+        },
+        "currentJobProgressSummary": {
+          "type": ["string", "null"]
+        },
+        "currentJobBlockedReason": {
+          "type": ["string", "null"]
+        },
+        "currentJobResumeCondition": {
+          "type": ["string", "null"]
+        },
+        "currentJobStatusReasonCode": {
+          "type": ["string", "null"]
+        },
+        "currentJobStatusObservedAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
         "executor": {
           "type": ["string", "null"]
+        },
+        "context": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         },
         "progressSummary": {
           "type": "string"
@@ -212,6 +254,84 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sideChannel": {
+      "type": "object",
+      "required": ["pendingContextCount", "messages", "attachments"],
+      "properties": {
+        "pendingContextCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["messageId", "authorKind", "text", "sentAt"],
+            "properties": {
+              "messageId": { "type": "string" },
+              "authorKind": { "type": "string" },
+              "text": { "type": "string" },
+              "sentAt": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["attachId", "text", "contentKind", "targetLabel", "deliveryLabel", "attachedAt"],
+            "properties": {
+              "attachId": { "type": "string" },
+              "text": { "type": "string" },
+              "contentKind": { "type": "string" },
+              "targetLabel": { "type": "string" },
+              "deliveryLabel": { "type": "string" },
+              "attachedAt": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "bridgeActionDelivery": {
+      "type": "object",
+      "required": ["actionReceiptId", "status", "affairId", "jobId", "deliveredAt", "reasonCode", "message"],
+      "properties": {
+        "actionReceiptId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "sent_to_phone",
+            "queued_until_session",
+            "rejected",
+            "applied_locally",
+            "waiting_for_callback"
+          ]
+        },
+        "affairId": {
+          "type": ["string", "null"]
+        },
+        "jobId": {
+          "type": ["string", "null"]
+        },
+        "deliveredAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "reasonCode": {
+          "type": ["string", "null"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false

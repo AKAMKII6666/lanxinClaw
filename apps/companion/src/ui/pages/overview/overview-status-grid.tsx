@@ -1,15 +1,24 @@
 /**
  * 总览五张状态卡网格。
  *
- * 职责：按 snapshot 渲染状态卡并转发 bridge 操作。
- * 不拥有：snapshot 拉取、权限裁决。
- * 副作用：调用 bridge.submitAction。
+ * 职责：按 snapshot 渲染状态卡，规划操作并转发壳侧导航 / 反馈 / bridge。
+ * 不拥有：snapshot 拉取、权限裁决、配对状态机。
+ * 副作用：调用 bridge.submitAction 与父级导航回调。
  */
 
 import Box from "@mui/material/Box";
 import type { ReactElement } from "react";
-import type { ControlPanelSnapshotView } from "../../../bridge/contract.js";
+import type { BridgeNavPage, ControlPanelSnapshotView } from "../../../bridge/contract.js";
 import type { RendererBridgeApi } from "../../bridge/renderer-api.js";
+import {
+  planCredentialSync,
+  planOpenChat,
+  planOpenDiagnostics,
+  planRequestPairing,
+  planViewTasks,
+  snapshotHasPendingPairing,
+  type OverviewActionPlan,
+} from "./overview-actions.js";
 import {
   AFFAIR_STATUS_LABEL,
   CLAW_CORE_STATUS_LABEL,
@@ -21,17 +30,33 @@ import {
 import { StatusCard } from "./overview-status-card.js";
 
 /**
- * @param props 含 snapshot 与 bridge
+ * @param props 含 snapshot、bridge 与壳侧效果回调
  * @returns 状态卡网格
  */
 export function OverviewStatusGrid(props: {
   snapshot: ControlPanelSnapshotView;
   bridge: RendererBridgeApi;
+  onNavigate: (page: BridgeNavPage) => void;
+  onOpenPairing: () => void;
+  onFeedback: (message: string) => void;
 }): ReactElement {
-  const { snapshot, bridge } = props;
+  const { snapshot, bridge, onNavigate, onOpenPairing, onFeedback } = props;
   const affairStatus = snapshot.currentAffair
     ? labelOf(AFFAIR_STATUS_LABEL, snapshot.currentAffair.status)
     : "无任务";
+
+  function runPlan(plan: OverviewActionPlan): void {
+    if (plan.navigateTo) {
+      onNavigate(plan.navigateTo);
+    }
+    if (plan.openPairing) {
+      onOpenPairing();
+    }
+    if (plan.feedback) {
+      onFeedback(plan.feedback);
+    }
+    void bridge.submitAction(plan.bridgeAction);
+  }
 
   return (
     <Box
@@ -52,7 +77,7 @@ export function OverviewStatusGrid(props: {
         message={snapshot.clawCore.message}
         actionLabel="查看诊断"
         onAction={() => {
-          void bridge.submitAction({ type: "clawCore.openDiagnostics" });
+          runPlan(planOpenDiagnostics());
         }}
       />
       <StatusCard
@@ -61,7 +86,7 @@ export function OverviewStatusGrid(props: {
         message={snapshot.credential.message}
         actionLabel="同步"
         onAction={() => {
-          void bridge.submitAction({ type: "credential.requestSync" });
+          runPlan(planCredentialSync(snapshot.credential.status));
         }}
       />
       <StatusCard
@@ -70,7 +95,7 @@ export function OverviewStatusGrid(props: {
         message={snapshot.device.message}
         actionLabel="重新配对"
         onAction={() => {
-          void bridge.submitAction({ type: "device.requestPairing" });
+          runPlan(planRequestPairing(snapshotHasPendingPairing(snapshot)));
         }}
       />
       <StatusCard
@@ -79,7 +104,7 @@ export function OverviewStatusGrid(props: {
         message={snapshot.zhangBoss.summary}
         actionLabel="打开聊天"
         onAction={() => {
-          void bridge.submitAction({ type: "zhangBoss.openChat" });
+          runPlan(planOpenChat());
         }}
       />
       <StatusCard
@@ -88,7 +113,7 @@ export function OverviewStatusGrid(props: {
         message={snapshot.currentAffair?.progressSummary ?? null}
         actionLabel="查看任务"
         onAction={() => {
-          void bridge.submitAction({ type: "navigate", page: "tasks" });
+          runPlan(planViewTasks());
         }}
       />
     </Box>

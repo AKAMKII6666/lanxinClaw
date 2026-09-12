@@ -10,6 +10,9 @@ import type { OpenClawRuntimeClient } from "../client/runtime-client.js";
 import { applyRunSnapshotToJob } from "../mapping/apply-run-snapshot.js";
 import type { AdapterJobStore } from "./job-store.js";
 import type { AdapterJobResult } from "./job-types.js";
+import { validateRunSnapshotIdentity } from "../evidence/snapshot-identity.js";
+import { runtimeErrorResult } from "../client/runtime-error-result.js";
+import { canonicalizeGatewaySessionKey, toGatewaySessionKey } from "../client/gateway/session-key.js";
 
 /**
  * 读取 adapter job；默认刷新 runtime 状态。
@@ -42,17 +45,33 @@ export async function readAdapterJob(
   }
 
   try {
-    const snapshot = await runtime.getRun(existing.openclawRunId);
+    const sessionKey =
+      canonicalizeGatewaySessionKey(existing.openclawSessionKey, "main", existing.jobId) ??
+      toGatewaySessionKey(existing.jobId);
+    const snapshot = await runtime.getRun(existing.openclawRunId, {
+      jobId: existing.jobId,
+      affairId: existing.affairId,
+      sessionKey,
+    });
+    const identity = validateRunSnapshotIdentity(existing, snapshot);
+    if (!identity.ok) {
+      return {
+        ok: false,
+        code: "runtime_evidence_mismatch",
+        message: identity.message,
+        retryable: false,
+      };
+    }
     const job = applyRunSnapshotToJob(existing, snapshot);
     store.set(job);
     return { ok: true, job };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "get_run_failed";
+    const runtime = runtimeErrorResult(err, "runtime_read_failed", "get_run_failed");
     return {
       ok: false,
-      code: "runtime_read_failed",
-      message,
-      retryable: true,
+      code: runtime.code,
+      message: runtime.message,
+      retryable: runtime.retryable,
     };
   }
 }

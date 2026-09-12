@@ -209,13 +209,18 @@ export async function runStructureGate(options = {}) {
 
   violations.push(...(await analyzeDirectoryClustering(root, config)));
   const bySeverity = splitBySeverity(violations);
-  return { ...bySeverity, violations, filesChecked: files.length };
+  const passed = structurePasses(bySeverity, options.strict);
+  return { ...bySeverity, violations, filesChecked: files.length, passed };
+}
+
+function structurePasses(result, strict) {
+  return result.errors.length === 0 && (!strict || result.warnings.length === 0);
 }
 
 async function main() {
-  const result = await runStructureGate();
+  const result = await runStructureGate({ strict: process.argv.includes("--strict") });
   printGateResult("check:structure", result);
-  if (result.errors.length > 0) process.exitCode = 1;
+  if (!result.passed) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

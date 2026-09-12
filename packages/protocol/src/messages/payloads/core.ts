@@ -25,6 +25,30 @@ export const PERMISSION_IDS = [
 /** 权限标识 */
 export type PermissionId = (typeof PERMISSION_IDS)[number];
 
+/** job 监督步骤类别 */
+export const JOB_RECENT_STEP_KINDS = ["tool", "lifecycle", "reply", "task"] as const;
+
+/** job 监督步骤 kind */
+export type JobRecentStepKind = (typeof JOB_RECENT_STEP_KINDS)[number];
+
+/** job 证据质量枚举 */
+export const JOB_EVIDENCE_QUALITIES = ["missing", "weak", "present"] as const;
+
+/** job 证据质量 */
+export type JobEvidenceQuality = (typeof JOB_EVIDENCE_QUALITIES)[number];
+
+/**
+ * Job 监督步骤；由 companion 投影，phone 只读复述。
+ */
+export interface JobRecentStep {
+  /** 步骤观测时间 ISO-8601 */
+  at: string;
+  /** 步骤类别 */
+  kind: JobRecentStepKind;
+  /** 脱敏后的步骤文本；单条 ≤ 240 字 */
+  text: string;
+}
+
 /**
  * Affair 对象载荷；用于 create / update / resume / close。
  * worker completed 不得把 status 直接写成 closed。
@@ -62,20 +86,34 @@ export interface JobPayload {
   executor: "openclaw";
   /** job 执行状态 */
   status: JobStatus;
+  /** job 用途；exploration 只为澄清上下文，不代表正式执行承诺 */
+  purpose?: "execution" | "exploration";
   /** 执行目标摘要 */
   goal: string;
   /** 工作区提示路径；可空，非授权本身 */
   workspaceHint?: string | null;
   /** 已声明允许的权限 id 列表 */
   allowedPermissions: string[];
-  /** 进度摘要 */
+  /** 进度摘要；禁止单独广播纯低信号状态词 */
   progressSummary?: string;
+  /** 最近执行步骤；companion → phone；可空兼容 */
+  recentSteps?: JobRecentStep[];
+  /** 终态可验收摘要；低信号时为 null */
+  resultDigest?: string | null;
+  /** 证据质量；phone 据此生成 reportHint，不得驱动高风险状态机 */
+  evidenceQuality?: JobEvidenceQuality;
   /** 阻塞原因 */
   blockedReason?: string | null;
   /** 恢复条件 */
   resumeCondition?: string | null;
   /** 关联权限请求 */
   permissionRequestId?: string | null;
+  /** phone 侧生成的任务意图幂等键；可空，旧端可不传 */
+  taskIntentId?: string | null;
+  /** companion 对当前状态的稳定理由码；由 companion 生成，可空 */
+  statusReasonCode?: string | null;
+  /** companion 最近一次采纳状态证据的 ISO-8601 时间；由 companion 生成，可空 */
+  statusObservedAt?: string | null;
 }
 
 /**
@@ -142,6 +180,8 @@ export interface PairingCompletedPayload {
   phoneDeviceId: string;
   /** 桌面设备 id */
   desktopDeviceId: string;
+  /** 配对共享秘密；仅用于后续 session.open HMAC，不得记录日志 */
+  pairingSecret: string;
   /** 配对完成时间 */
   pairedAt: string;
 }

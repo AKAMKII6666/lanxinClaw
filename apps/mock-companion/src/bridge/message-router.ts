@@ -50,6 +50,16 @@ export function routeInboundMessage(
     return { ok: false, error: validated.error };
   }
   const inbound = validated.value;
+  if (isRequiresSession(inbound.type) && !store.session) {
+    return {
+      ok: false,
+      error: createProtocolError(
+        "session_required",
+        "业务消息须先完成配对与 session.open",
+        false,
+      ),
+    };
+  }
   switch (inbound.type) {
     case "pairing.request":
       return handlePairingRequest(store, config, inbound, emit);
@@ -74,6 +84,19 @@ export function routeInboundMessage(
         ),
       };
   }
+}
+
+/** 需要已认证 session 的消息前缀（pairing.* / session.* 例外） */
+const REQUIRES_SESSION_PREFIXES = ["affair.", "job.", "chat.", "permission."];
+
+/**
+ * 判断消息类型是否要求已认证 session。
+ *
+ * @param type 消息类型
+ * @returns 是否要求 session
+ */
+function isRequiresSession(type: string): boolean {
+  return REQUIRES_SESSION_PREFIXES.some((prefix) => type.startsWith(prefix));
 }
 
 /**

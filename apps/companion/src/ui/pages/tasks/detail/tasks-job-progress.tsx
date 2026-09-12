@@ -25,18 +25,25 @@ export function TasksJobProgress(props: { job: JobDetailView }): ReactElement {
         {job.jobId} · {labelOf(JOB_STATUS_LABEL, job.status)}
       </Typography>
       <Typography variant="body2" sx={{ mt: 1 }}>
+        目标：{job.goal}
+      </Typography>
+      <Typography variant="body2" sx={{ mt: 1 }}>
         {job.progressSummary}
       </Typography>
-      <Typography variant="subtitle2" sx={{ mt: 1.5 }}>
-        已尝试步骤
-      </Typography>
-      <Box component="ol" sx={{ mt: 0.5, pl: 2 }}>
-        {job.attemptedSteps.map((step) => (
-          <Typography component="li" key={step} variant="body2">
-            {step}
+      {job.attemptedSteps.length > 0 ? (
+        <>
+          <Typography variant="subtitle2" sx={{ mt: 1.5 }}>
+            已尝试步骤
           </Typography>
-        ))}
-      </Box>
+          <Box component="ol" sx={{ mt: 0.5, pl: 2 }}>
+            {job.attemptedSteps.map((step) => (
+              <Typography component="li" key={step} variant="body2">
+                {step}
+              </Typography>
+            ))}
+          </Box>
+        </>
+      ) : null}
       {job.blockedReason ? (
         <Typography variant="body2" color="error" sx={{ mt: 1 }}>
           阻塞：{job.blockedReason}

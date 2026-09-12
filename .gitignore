@@ -13,6 +13,7 @@ runtime/
 secrets/
 *.pem
 *.key
+vendor/
 
 # GBX runtime artifacts (regenerable per run; do not commit)
 .ai-workflow/

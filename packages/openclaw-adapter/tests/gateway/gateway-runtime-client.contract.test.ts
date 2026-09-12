@@ -36,21 +36,25 @@ describe("gateway runtime client contract", () => {
       allowedPermissions: ["workspace.read"],
     });
     assert.equal(created.ok, true);
-    assert.equal(fake.createdRequests[0]?.sessionKey, "lanxing-job:job_gateway_001");
+    assert.equal(fake.createdRequests[0]?.sessionKey, "agent:main:lanxing-job:job_gateway_001");
+    assert.equal(fake.createdRequests[0]?.idempotencyKey, "lanxing-job:job_gateway_001");
     assert.deepEqual(fake.createdRequests[0]?.scopes, ["workspace.read"]);
+    if (created.ok) {
+      assert.equal(created.job.openclawSessionKey, "agent:main:lanxing-job:job_gateway_001");
+    }
 
     if (!created.ok) {
       return;
     }
     fake.advance(created.job.openclawRunId ?? "", {
       status: "completed",
-      summary: "gateway done",
+      summary: "gateway done: list_root count=2",
     });
     const read = await adapter.readJob("job_gateway_001");
     assert.equal(read.ok, true);
     if (read.ok) {
       assert.equal(read.job.status, "completed");
-      assert.equal(read.job.progressSummary, "gateway done");
+      assert.match(read.job.progressSummary, /list_root count=2/);
     }
 
     const canceled = await adapter.cancelJob("job_gateway_001");
@@ -96,6 +100,48 @@ describe("gateway runtime client contract", () => {
       () => missingAuth.createRun({ input: "x" }),
       /gateway_auth_missing/,
     );
+  });
+
+  it("adapter 保留 Gateway 配置错误码与 retryable=false", async () => {
+    const runtime = createGatewayRuntimeClient({
+      gatewayUrl: "",
+      agentId: "main",
+      defaultScopes: ["workspace.read"],
+      authProvider: () => "test-token",
+      transport: createFakeGatewayTransport().transport,
+    });
+    const adapter = new OpenClawAdapter({ runtime });
+    const created = await adapter.createJob({
+      jobId: "job_gateway_error_001",
+      affairId: "affair_gateway_error_001",
+      goal: "Gateway error shape",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, false);
+    if (!created.ok) {
+      assert.equal(created.code, "gateway_url_missing");
+      assert.equal(created.retryable, false);
+    }
+  });
+
+  it("createRun 优先使用 job 级 allowedPermissions 作为 scope 摘要", async () => {
+    const fake = createFakeGatewayTransport();
+    const runtime = createGatewayRuntimeClient({
+      gatewayUrl: "ws://127.0.0.1:18789",
+      agentId: "main",
+      defaultScopes: ["workspace.read", "command.run"],
+      authProvider: () => "test-token",
+      transport: fake.transport,
+    });
+    const adapter = new OpenClawAdapter({ runtime });
+    const created = await adapter.createJob({
+      jobId: "job_gateway_scope_001",
+      affairId: "affair_gateway_scope_001",
+      goal: "Gateway scope boundary",
+      allowedPermissions: ["workspace.read"],
+    });
+    assert.equal(created.ok, true);
+    assert.deepEqual(fake.createdRequests[0]?.scopes, ["workspace.read"]);
   });
 
   it("未注入 transport 时默认 raw WS，失败也不回退 mock", async () => {

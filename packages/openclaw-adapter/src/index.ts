@@ -26,10 +26,18 @@ export { createFileAdapterJobStore } from "./jobs/file-job-store.js";
 export { createAdapterJob } from "./jobs/create-job.js";
 export { readAdapterJob } from "./jobs/read-job.js";
 export { cancelAdapterJob } from "./jobs/cancel-job.js";
+export {
+  DEFAULT_GATEWAY_AGENT_ID,
+  toGatewaySessionKey,
+  canonicalizeGatewaySessionKey,
+  sessionKeysEquivalent,
+  toJobIdempotencyKey,
+} from "./client/gateway/session-key.js";
 
 export type {
   OpenClawRuntimeClient,
   CreateOpenClawRunParams,
+  OpenClawRunContext,
   OpenClawRunSnapshot,
 } from "./client/runtime-client.js";
 
@@ -52,6 +60,7 @@ export {
   createUnavailableGatewayTransport,
   GatewayTransportError,
   type GatewayCreateRunRequest,
+  type GatewayRunContext,
   type GatewayTransport,
 } from "./client/gateway/transport.js";
 export {
@@ -60,8 +69,7 @@ export {
 } from "./client/gateway/fake/transport.js";
 export {
   createRawWebSocketGatewayTransport,
-  type RawGatewayMethodNames,
-  type RawWebSocketGatewayTransportOptions,
+    type RawWebSocketGatewayTransportOptions,
 } from "./client/gateway/raw-ws/transport.js";
 
 export {
@@ -80,3 +88,17 @@ export {
 } from "./status/openclaw-run-status.js";
 
 export { mapOpenClawRunStatusToJobStatus } from "./mapping/map-run-status.js";
+export { decideJobFromEvidence, type OpenClawToLanxinJobDecision } from "./mapping/decide-job-from-evidence.js";
+export {
+  buildExecutionEvidence,
+  type OpenClawEvidenceKind,
+  type OpenClawEvidenceStrength,
+  type OpenClawExecutionEvidence,
+  type OpenClawFinalReplyEvidence,
+  type OpenClawGatewayCapabilities,
+  type OpenClawLifecycleEvidence,
+  type OpenClawProbeResult,
+  type OpenClawTaskEvidence,
+  type OpenClawToolFinding,
+  type OpenClawToolFindingStatus,
+} from "./evidence/openclaw-execution-evidence.js";

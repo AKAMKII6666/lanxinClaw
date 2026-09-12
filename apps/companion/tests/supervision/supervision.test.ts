@@ -16,6 +16,8 @@ import {
   runSupervisionTick,
 } from "../../src/supervision/tick.js";
 import type { SupervisionSnapshot } from "../../src/supervision/types.js";
+import { applySupervisionActions } from "../../src/supervision/apply-actions.js";
+import type { AffairPayload, ProtocolEnvelope } from "@lanxin-claw/protocol";
 
 function baseSnapshot(
   overrides: Partial<SupervisionSnapshot>,
@@ -45,6 +47,18 @@ describe("supervision tick", () => {
     assert.equal(
       actions.some((a) => a.kind === "mark_waiting_acceptance"),
       true,
+    );
+  });
+
+  it("exploration completed 只继续观察，不进入验收", () => {
+    const actions = runSupervisionTick(
+      baseSnapshot({ jobStatus: "completed", jobPurpose: "exploration" }),
+      createSupervisionNotifyMemory(),
+    );
+    assert.equal(actions[0]?.kind, "continue_watch");
+    assert.equal(
+      actions.some((a) => a.kind === "mark_waiting_acceptance"),
+      false,
     );
   });
 
@@ -109,5 +123,46 @@ describe("acceptance strategy", () => {
     ].join(" ");
     assert.equal(text.includes("apiKey"), false);
     assert.equal(text.includes("pairingSecret"), false);
+  });
+});
+
+describe("applySupervisionActions", () => {
+  it("mark_waiting_acceptance 广播 affair.update 且不得 closed", () => {
+    const affair: AffairPayload = {
+      affairId: "affair_apply_001",
+      title: "落地",
+      ownerAgent: "zhang-boss",
+      status: "running",
+      context: [],
+      acceptanceCriteria: ["ok"],
+      blockedReason: null,
+      resumeCondition: null,
+      currentJobId: "job_apply_001",
+    };
+    const affairs = new Map([[affair.affairId, affair]]);
+    const broadcasts: ProtocolEnvelope[] = [];
+    applySupervisionActions(
+      [
+        {
+          kind: "mark_waiting_acceptance",
+          affairId: affair.affairId,
+          jobId: "job_apply_001",
+          reason: "worker completed",
+        },
+      ],
+      {
+        getAffair: (id) => affairs.get(id),
+        broadcast: (envelope) => {
+          broadcasts.push(envelope);
+          if (envelope.type === "affair.update") {
+            affairs.set(affair.affairId, envelope.payload as AffairPayload);
+          }
+        },
+        party: { desktopDeviceId: "d1", phoneDeviceId: "p1" },
+      },
+    );
+    assert.equal(broadcasts[0]?.type, "affair.update");
+    assert.equal((broadcasts[0]?.payload as AffairPayload).status, "waiting_acceptance");
+    assert.notEqual((broadcasts[0]?.payload as AffairPayload).status, "closed");
   });
 });

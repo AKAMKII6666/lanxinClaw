@@ -24,6 +24,8 @@
     "@lanxin-claw/protocol": "0.1.0",
     "@mui/material": "^6.4.0",
     "bonjour-service": "^1.2.1",
+    "pino": "^9.14.0",
+    "pino-roll": "^2.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.18.3"

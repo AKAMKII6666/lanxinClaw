@@ -75,6 +75,7 @@ export function createDefaultControlPanelSnapshot(): ControlPanelSnapshotView {
       summary: null,
     },
     currentAffair: null,
+    affairs: [],
   };
 }
 

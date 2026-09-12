@@ -1,0 +1,19 @@
+{
+  "protocolVersion": "0.2",
+  "messageId": "msg_job_cancel_001",
+  "correlationId": "msg_job_create_001",
+  "sentAt": "2026-07-22T00:06:00.000Z",
+  "source": {
+    "kind": "phone",
+    "deviceId": "phone_lanxing_001"
+  },
+  "target": {
+    "kind": "companion",
+    "deviceId": "desktop_liao_pc"
+  },
+  "type": "job.cancel",
+  "payload": {
+    "jobId": "job_fix_code_001",
+    "affairId": "affair_fix_code_001"
+  }
+}

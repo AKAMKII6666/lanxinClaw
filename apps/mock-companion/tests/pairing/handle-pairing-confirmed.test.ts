@@ -48,7 +48,7 @@ describe("handlePairingConfirmed", () => {
         pairingId: "pair_test_wrong",
         phoneDeviceId: "phone_test_001",
         phoneDisplayName: "Test Phone",
-        protocolVersion: "0.1",
+        protocolVersion: "0.2",
         capabilities: [],
       },
     });
@@ -137,7 +137,7 @@ describe("handlePairingConfirmed", () => {
         pairingId,
         phoneDeviceId: "phone_test_001",
         phoneDisplayName: "Test Phone",
-        protocolVersion: "0.1",
+        protocolVersion: "0.2",
         capabilities: [],
       },
     });

@@ -1,5 +1,5 @@
 {
-  "protocolVersion": "0.1",
+  "protocolVersion": "0.2",
   "messageId": "msg_job_completed_001",
   "correlationId": "msg_job_create_001",
   "sentAt": "2026-07-22T00:20:00.000Z",
@@ -20,7 +20,16 @@
     "goal": "Inspect and fix the selected project until tests pass.",
     "workspaceHint": "F:/workspace/xxx",
     "allowedPermissions": ["workspace.read", "workspace.write", "command.run"],
-    "progressSummary": "The failing test was fixed and the test command passed.",
+    "progressSummary": "The failing test was fixed and the test command passed with 52 tests.",
+    "recentSteps": [
+      {
+        "at": "2026-07-22T00:19:30.000Z",
+        "kind": "tool",
+        "text": "command.run: npm test passed with 52 tests"
+      }
+    ],
+    "resultDigest": "The failing test was fixed and the test command passed with 52 tests.",
+    "evidenceQuality": "present",
     "blockedReason": null
   }
 }

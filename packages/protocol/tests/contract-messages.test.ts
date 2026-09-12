@@ -78,6 +78,7 @@ describe("protocol message contract 正反例", () => {
     const files = [
       "affair-create.envelope.json",
       "job-blocked.envelope.json",
+      "job-canceled.envelope.json",
       "job-completed.envelope.json",
       "tasks/job-progress.envelope.json",
       "tasks/affair-waiting-acceptance.envelope.json",
@@ -98,6 +99,17 @@ describe("protocol message contract 正反例", () => {
         .ok,
       true,
     );
+    assert.equal(
+      validatePayloadForType(
+        "job.canceled",
+        jobPayload({
+          status: "canceled",
+          statusReasonCode: "openclaw.cancel_ack",
+          statusObservedAt: "2026-07-22T00:07:00.000Z",
+        }),
+      ).ok,
+      true,
+    );
     const perm = validatePayloadForType("permission.request", {
       permissionRequestId: "perm_req_c1",
       affairId: "affair_contract_001",
@@ -112,7 +124,7 @@ describe("protocol message contract 正反例", () => {
 
   it("反例：未知 message type", () => {
     const bad = validateMessage({
-      protocolVersion: "0.1",
+      protocolVersion: "0.2",
       messageId: "msg_unknown_type",
       sentAt: "2026-07-23T00:00:00.000Z",
       source: { kind: "phone", deviceId: "p1" },
@@ -148,6 +160,69 @@ describe("protocol message contract 正反例", () => {
       validatePayloadForType("job.create", jobPayload({ allowedPermissions: "workspace.read" })).ok,
       false,
     );
+    assert.equal(
+      validatePayloadForType("job.create", jobPayload({ purpose: "remote_shell" })).ok,
+      false,
+    );
+    assert.equal(
+      validatePayloadForType("job.create", jobPayload({ purpose: "exploration" })).ok,
+      true,
+    );
+    assert.equal(
+      validatePayloadForType("job.failed", jobPayload({ status: "failed", statusObservedAt: "刚刚" })).ok,
+      false,
+    );
+    assert.equal(
+      validatePayloadForType("job.completed", jobPayload({ status: "running" })).ok,
+      false,
+    );
+    assert.equal(
+      validateMessage(createEnvelope({
+        source: { kind: "companion", deviceId: "d1" },
+        target: { kind: "phone", deviceId: "p1" },
+        type: "job.failed",
+        payload: jobPayload({ status: "completed" }),
+      })).ok,
+      false,
+    );
+  });
+
+  it("正例：job 可携带可选 taskIntentId，未知 job 字段仍拒绝", () => {
+    assert.equal(
+      validatePayloadForType("job.create", jobPayload({ taskIntentId: "task_intent_contract_001" })).ok,
+      true,
+    );
+    assert.equal(
+      validatePayloadForType("job.create", jobPayload({ unexpectedField: "nope" })).ok,
+      false,
+    );
+  });
+
+  it("正例：job 可携带监督投影字段 recentSteps/resultDigest/evidenceQuality", () => {
+    const ok = validatePayloadForType(
+      "job.completed",
+      jobPayload({
+        status: "completed",
+        progressSummary: "桌面文件：A.txt",
+        recentSteps: [
+          {
+            at: "2026-09-06T02:00:00.000Z",
+            kind: "reply",
+            text: "桌面文件：A.txt",
+          },
+        ],
+        resultDigest: "桌面文件：A.txt",
+        evidenceQuality: "present",
+      }),
+    );
+    assert.equal(ok.ok, true, ok.ok ? "" : ok.error.message);
+    assert.equal(
+      validatePayloadForType(
+        "job.progress",
+        jobPayload({ status: "running", evidenceQuality: "unknown" }),
+      ).ok,
+      false,
+    );
   });
 
   it("反例：chat.message 不得冒充系统指令字段（未知 key）", () => {
@@ -177,6 +252,10 @@ describe("protocol message contract 正反例", () => {
 });
 
 describe("protocol 状态机 contract", () => {
+  it("job 可从 queued 快速完成，但 completed 后仍是终态", () => {
+    assert.equal(canTransitionJobStatus("queued", "completed"), true);
+  });
+
   it("job.completed 是终态，不得再迁出", () => {
     assert.equal(canTransitionJobStatus("completed", "running"), false);
     assert.equal(canTransitionJobStatus("completed", "closed" as never), false);
