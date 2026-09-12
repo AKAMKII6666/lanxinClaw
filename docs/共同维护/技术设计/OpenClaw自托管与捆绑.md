@@ -13,6 +13,7 @@
 
 - openclaw 为 MIT 协议 npm 包；生产依赖约 204MB（非旧版估算的 1.1GB），tarball 约 20MB。
 - 需要 Node ≥ 24.15.0（engines 与 postinstall 要求）；安装包捆绑 Node 24.15.x，companion 用它 spawn 子进程。
+- Windows 发布包通过 `npm run prepare:runtime:win` 将 OpenClaw、Node 24.15.0 x64 与 `@openclaw/qwen-provider@2026.7.1` 本地 seed 整理到 `.release/runtime/`，再由 electron-builder `extraResources` 放入安装包。
 - 启动命令：`node <openclaw>/openclaw.mjs gateway run`；冷启动约 4–6 秒。
 - 运行时禁用渠道：`OPENCLAW_SKIP_CHANNELS=1`（agent/gateway/HTTP 均保留）。
 
@@ -89,5 +90,5 @@ Companion 任务发放仍走用户授权 UX（`needs_permission` → 用户确�
 ## 7. 已知注意点
 
 - gateway 同端口还提供 HTTP control UI（loopback 仅本机可达），联调文档需注明。
-- 首启若配置声明缺失 provider 插件，gateway 可能自动从 npm 安装（一次网络操作）。
+- 开发态首启若配置声明缺失 provider 插件，gateway 可自动从 npm 安装（一次网络操作）；打包态必须使用随包 provider seed，缺 seed 直接失败，不退回联网安装。
 - 配置热加载：`config set` 后 gateway 自动 reload，无需重启。

@@ -29,9 +29,14 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "sync:phone-contract": "tsx scripts/contracts/sync-phone-state-contract.ts",
     "check:phone-contract": "tsx scripts/contracts/sync-phone-state-contract.ts --check",
-    "test:cross-repo": "npm run check:phone-contract && tsx --test scripts/cross-repo/*.test.ts"
+    "test:cross-repo": "npm run check:phone-contract && tsx --test scripts/cross-repo/*.test.ts",
+    "build:companion": "npm run build:shell -w @lanxin-claw/companion",
+    "prepare:runtime:win": "node scripts/release/prepare-runtime-win.mjs",
+    "dist:win": "npm run build:companion && npm run prepare:runtime:win && electron-builder --projectDir apps/companion --config electron-builder.json --win nsis --x64 --publish never && node scripts/release/write-checksums.mjs apps/companion/release",
+    "release:win:local": "npm run quality && npm run dist:win"
   },
   "devDependencies": {
+    "electron-builder": "26.15.3",
     "typescript": "^5.8.3"
   },
   "engines": {

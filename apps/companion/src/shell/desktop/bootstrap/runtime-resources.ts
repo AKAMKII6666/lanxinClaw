@@ -18,7 +18,12 @@ import { createSecretsFromSafeStorage } from "../safe-storage-secrets.js";
 export function createShellRuntimeResources(electron: ElectronRuntime, options: StartCompanionShellOptions, userDataDir: string | null, logRegistry: LoggerRegistry) {
   const desktopDeviceId = process.env.LANXIN_DESKTOP_DEVICE_ID?.trim() || "lanxin-desktop";
   const adapterJobStore = userDataDir ? createFileAdapterJobStore(path.join(userDataDir, "adapter-jobs.json")) : undefined;
-  const { openclawEntry, openclawNodeBin } = resolveInstalledRuntime(electron, options);
+  const {
+    openclawEntry,
+    openclawNodeBin,
+    providerSeedDir,
+    allowProviderNetworkBootstrap,
+  } = resolveInstalledRuntime(electron, options);
   const { gatewayStateDir, workspace } = resolveWorkspace(options, userDataDir);
   const adapter =
     options.adapter ??
@@ -32,6 +37,8 @@ export function createShellRuntimeResources(electron: ElectronRuntime, options: 
       ? new GatewayRuntimeService({
           openclawEntry,
           nodeBin: openclawNodeBin,
+          providerSeedDir,
+          allowProviderNetworkBootstrap,
           stateDir: gatewayStateDir,
           logFile: path.join(gatewayStateDir, "logs", "openclaw-runtime.log"),
           logger: logRegistry.getLogger("runtime"),
@@ -42,22 +49,53 @@ export function createShellRuntimeResources(electron: ElectronRuntime, options: 
 }
 
 function resolveInstalledRuntime(electron: ElectronRuntime, options: StartCompanionShellOptions) {
+  const resourcesPath = (process as { resourcesPath?: string }).resourcesPath ?? null;
   const entryInput = {
     appPath: electron.app.getAppPath?.() ?? null,
-    resourcesPath: (process as { resourcesPath?: string }).resourcesPath ?? null,
+    resourcesPath,
     cwd: process.cwd(),
     ...(options.openclawEntry !== undefined ? { explicit: options.openclawEntry } : {}),
     ...(process.env.LANXIN_OPENCLAW_ENTRY !== undefined ? { envEntry: process.env.LANXIN_OPENCLAW_ENTRY } : {}),
   };
   const openclawEntry = resolveBundledOpenClawEntry(entryInput);
   const openclawNodeBin = resolveOpenClawNodeBin({
-    resourcesPath: (process as { resourcesPath?: string }).resourcesPath ?? null,
+    resourcesPath,
     execPath: process.execPath,
     ...(process.env.LANXIN_OPENCLAW_NODE_BIN !== undefined
       ? { envNodeBin: process.env.LANXIN_OPENCLAW_NODE_BIN }
       : {}),
   });
-  return { openclawEntry, openclawNodeBin };
+  const providerSeedDir = resolveProviderSeedDir({
+    appPath: entryInput.appPath,
+    resourcesPath,
+    envSeedDir: process.env.LANXIN_OPENCLAW_PROVIDER_SEED_DIR,
+  });
+  return {
+    openclawEntry,
+    openclawNodeBin,
+    providerSeedDir,
+    allowProviderNetworkBootstrap: electron.app.isPackaged !== true,
+  };
+}
+
+function resolveProviderSeedDir(input: {
+  appPath?: string | null;
+  resourcesPath?: string | null;
+  envSeedDir?: string | null | undefined;
+}): string | null {
+  const candidates = [
+    input.envSeedDir,
+    input.resourcesPath ? path.join(input.resourcesPath, "openclaw-provider-seeds") : null,
+    input.resourcesPath ? path.join(input.resourcesPath, "app", "openclaw-provider-seeds") : null,
+    input.appPath ? path.join(input.appPath, "openclaw-provider-seeds") : null,
+  ];
+  for (const candidate of candidates) {
+    const normalized = candidate?.trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
 }
 
 function resolveWorkspace(options: StartCompanionShellOptions, userDataDir: string | null) {

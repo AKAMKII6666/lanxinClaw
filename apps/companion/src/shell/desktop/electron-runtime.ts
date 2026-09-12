@@ -26,6 +26,8 @@ export interface ElectronRuntime {
     /** 读取应用用户数据目录（可选；缺省回退内存/仓库目录） */
     getPath?(name: string): string;
     getAppPath?(): string;
+    /** Electron 打包态标记；打包后禁用 provider 联网 bootstrap */
+    isPackaged?: boolean;
     getLoginItemSettings?(): { openAtLogin: boolean };
     setLoginItemSettings?(settings: { openAtLogin: boolean }): void;
   };

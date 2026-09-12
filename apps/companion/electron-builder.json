@@ -1,0 +1,61 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "app.lanxin.claw",
+  "productName": "LanxinClaw",
+  "copyright": "Copyright (c) 2026 LanxinClaw contributors",
+  "electronVersion": "34.5.8",
+  "asar": true,
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/main/**/*",
+    "dist/renderer/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../../.release/runtime/openclaw",
+      "to": "openclaw"
+    },
+    {
+      "from": "../../.release/runtime/node",
+      "to": "node"
+    },
+    {
+      "from": "../../.release/runtime/openclaw-provider-seeds",
+      "to": "openclaw-provider-seeds"
+    },
+    {
+      "from": "../../.release/runtime/runtime-manifest.json",
+      "to": "runtime-manifest.json"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "src/shell/desktop/icons/app.ico",
+    "artifactName": "LanxinClaw-Setup-${version}-${arch}.${ext}",
+    "forceCodeSigning": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowElevation": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": "always",
+    "createStartMenuShortcut": true,
+    "shortcutName": "LanxinClaw",
+    "installerIcon": "src/shell/desktop/icons/app.ico",
+    "uninstallerIcon": "src/shell/desktop/icons/app.ico",
+    "deleteAppDataOnUninstall": false
+  },
+  "npmRebuild": false,
+  "buildDependenciesFromSource": false
+}

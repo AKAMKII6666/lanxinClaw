@@ -30,7 +30,7 @@ function fixture(hang = false) {
 const input = { provider: "qwen", apiKey: "model-key-must-not-reach-installer", endpoint: null,
   modelRef: "qwen/qwen3.5-plus", workspace: "fixture" };
 
-test("外置 Qwen 使用精确官方包；安装器不收模型 key，完整安装幂等，残缺重新修复", async () => {
+test("开发态 Qwen 缺 seed 时使用精确官方包；安装器不收模型 key，完整安装幂等，残缺重新修复", async () => {
   const options = fixture();
   const signal = new AbortController().signal;
   await prepareRuntimeProvider(input, options, signal);
@@ -47,6 +47,41 @@ test("外置 Qwen 使用精确官方包；安装器不收模型 key，完整安�
   await prepareRuntimeProvider(input, options, signal);
   assert.equal(hasPinnedQwenPackage(options.stateDir), true);
   assert.equal(fs.existsSync(invocationFile), true);
+});
+
+test("打包态 Qwen 优先使用随包 provider seed，不访问 npm registry", async () => {
+  const options = fixture();
+  const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), "lanxin-provider-seed-"));
+  const seedArchive = path.join(seedDir, "qwen-provider-2026.7.1.tgz");
+  fs.writeFileSync(seedArchive, "seed", "utf8");
+  const signal = new AbortController().signal;
+
+  await prepareRuntimeProvider(input, {
+    ...options,
+    providerSeedDir: seedDir,
+    allowProviderNetworkBootstrap: false,
+  }, signal);
+
+  const invocation = JSON.parse(fs.readFileSync(path.join(options.stateDir, "invocation.json"), "utf8"));
+  assert.deepEqual(invocation.args, ["plugins", "install", seedArchive, "--force"]);
+  assert.equal(invocation.credentialPresent, false);
+  assert.equal(hasPinnedQwenPackage(options.stateDir), true);
+});
+
+test("打包态 Qwen 缺 provider seed 时失败，不能退回联网安装", async () => {
+  const options = fixture();
+  const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), "lanxin-provider-seed-missing-"));
+  const signal = new AbortController().signal;
+
+  await assert.rejects(
+    () => prepareRuntimeProvider(input, {
+      ...options,
+      providerSeedDir: seedDir,
+      allowProviderNetworkBootstrap: false,
+    }, signal),
+    /provider_seed_missing:qwen:qwen-provider-2026\.7\.1\.tgz/,
+  );
+  assert.equal(fs.existsSync(path.join(options.stateDir, "invocation.json")), false);
 });
 
 test("取消冷启动会结束已启动的安装进程且不能报告组件就绪", async () => {

@@ -11,6 +11,7 @@ import type { GatewayRuntimeServiceOptions, StartGatewayRuntimeInput } from "../
 
 const QWEN_PACKAGE = "@openclaw/qwen-provider";
 const QWEN_VERSION = "2026.7.1";
+const QWEN_SEED_ARCHIVE = `qwen-provider-${QWEN_VERSION}.tgz`;
 const VERIFIED_RUNTIME_VERSION = "2026.7.1-2";
 const BOOTSTRAP_TIMEOUT_MS = 180_000;
 
@@ -40,15 +41,42 @@ export function hasPinnedQwenPackage(stateDir: string): boolean {
   });
 }
 
+/** 查找随产品携带的 Qwen provider 离线 seed archive。 */
+export function resolveQwenProviderSeedArchive(seedDir: string | null | undefined): string | null {
+  const trimmed = seedDir?.trim();
+  if (!trimmed) return null;
+  const archive = path.join(trimmed, QWEN_SEED_ARCHIVE);
+  return fs.existsSync(archive) ? archive : null;
+}
+
+function buildProviderInstallArgs(options: GatewayRuntimeServiceOptions): string[] {
+  const seedArchive = resolveQwenProviderSeedArchive(options.providerSeedDir);
+  if (seedArchive) {
+    return [options.openclawEntry, "plugins", "install", seedArchive, "--force"];
+  }
+  if (options.allowProviderNetworkBootstrap === false) {
+    throw new Error(`provider_seed_missing:qwen:${QWEN_SEED_ARCHIVE}`);
+  }
+  return [
+    options.openclawEntry,
+    "plugins",
+    "install",
+    `${QWEN_PACKAGE}@${QWEN_VERSION}`,
+    "--pin",
+    "--force",
+  ];
+}
+
 /** 安装器无模型凭据；取消/超时终止自己启动的 CLI 进程树，不留下 npm 子进程。 */
 function installProvider(options: GatewayRuntimeServiceOptions, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
   const env = createGatewayEnvironment({ parent: process.env, stateDir: options.stateDir, port: 0 });
   Object.assign(env, { OPENCLAW_CONFIG_PATH: path.join(options.stateDir, "provider-bootstrap.json"),
     OPENCLAW_SKIP_CHANNELS: "1", HTTP_PROXY: "", HTTPS_PROXY: "", http_proxy: "", https_proxy: "" });
+  const args = buildProviderInstallArgs(options);
   return new Promise((resolve, reject) => {
     const child = spawn(options.nodeBin ?? process.execPath,
-      [options.openclawEntry, "plugins", "install", `${QWEN_PACKAGE}@${QWEN_VERSION}`, "--pin", "--force"],
+      args,
       { env, windowsHide: true, stdio: ["ignore", "ignore", "ignore"] });
     let interruption: Error | null = null;
     const stop = (reason: string): void => {
