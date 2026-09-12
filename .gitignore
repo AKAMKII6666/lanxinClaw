@@ -14,6 +14,8 @@ secrets/
 *.pem
 *.key
 vendor/
+.release/
+apps/companion/release/
 
 # GBX runtime artifacts (regenerable per run; do not commit)
 .ai-workflow/

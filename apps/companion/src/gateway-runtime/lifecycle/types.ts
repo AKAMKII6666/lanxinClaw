@@ -12,6 +12,10 @@ export interface GatewayRuntimeServiceOptions {
   openclawEntry: string;
   /** node 可执行文件；缺省 process.execPath */
   nodeBin?: string;
+  /** 随包 provider seed 目录；打包后用于避免首次启动访问 npm registry */
+  providerSeedDir?: string | null;
+  /** 是否允许 provider 缺 seed 时联网 bootstrap；打包态必须为 false */
+  allowProviderNetworkBootstrap?: boolean;
   /** 隔离 state 目录（含 openclaw.json 与 credentials） */
   stateDir: string;
   /** 监听 host；默认 127.0.0.1 */
